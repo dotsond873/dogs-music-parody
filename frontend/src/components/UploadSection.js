@@ -1,6 +1,7 @@
 import React from 'react';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+const API = `${BACKEND_URL}/api`;
 
 export const UploadSection = ({ 
   title, 
@@ -47,7 +48,8 @@ export const UploadSection = ({
 };
 
 export const MediaPreviewGrid = ({ files, onRemove }) => {
-  const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+  const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+  const API = `${BACKEND_URL}/api`;
   
   if (files.length === 0) return null;
 
