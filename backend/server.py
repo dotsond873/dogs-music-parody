@@ -12,6 +12,8 @@ import uuid
 from datetime import datetime, timezone
 import requests
 import asyncio
+import yt_dlp
+import tempfile
 from emergentintegrations.llm.openai.video_generation import OpenAIVideoGeneration
 
 ROOT_DIR = Path(__file__).parent
@@ -101,6 +103,9 @@ class GenerateVideoRequest(BaseModel):
     prompt: str
     duration: int = 30
 
+class YouTubeAudioRequest(BaseModel):
+    youtube_url: str
+
 # Startup event
 @app.on_event("startup")
 async def startup():
@@ -156,6 +161,72 @@ async def get_file(file_id: str):
     except Exception as e:
         logger.error(f"File retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/youtube-audio", response_model=MediaUpload)
+async def extract_youtube_audio(request: YouTubeAudioRequest):
+    try:
+        youtube_url = request.youtube_url
+        file_id = str(uuid.uuid4())
+        
+        # Create temp directory for download
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_template = f"{temp_dir}/audio.%(ext)s"
+            
+            # yt-dlp options
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': output_template,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'quiet': True,
+                'no_warnings': True,
+            }
+            
+            # Download and extract audio
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(youtube_url, download=True)
+                video_title = info.get('title', 'youtube_audio')
+            
+            # Find the downloaded audio file
+            audio_path = f"{temp_dir}/audio.mp3"
+            if not os.path.exists(audio_path):
+                # Try to find any audio file in the directory
+                files = os.listdir(temp_dir)
+                for f in files:
+                    if f.endswith('.mp3'):
+                        audio_path = os.path.join(temp_dir, f)
+                        break
+            
+            with open(audio_path, 'rb') as f:
+                audio_data = f.read()
+            
+            # Upload to object storage
+            storage_path = f"{APP_NAME}/uploads/{file_id}.mp3"
+            result = put_object(storage_path, audio_data, "audio/mpeg")
+            
+            # Save to database
+            media_upload = MediaUpload(
+                id=file_id,
+                storage_path=result["path"],
+                original_filename=f"{video_title[:50]}.mp3",
+                content_type="audio/mpeg",
+                size=result["size"],
+                media_type="audio"
+            )
+            
+            doc = media_upload.model_dump()
+            await db.media_uploads.insert_one(doc)
+            
+            logger.info(f"Successfully extracted audio from YouTube: {video_title}")
+            return media_upload
+            
+    except Exception as e:
+        logger.error(f"YouTube audio extraction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to extract audio from YouTube: {str(e)}")
+
 
 def get_sora_duration(requested_duration: int) -> int:
     """Convert requested duration to valid Sora duration (4, 8, or 12)"""

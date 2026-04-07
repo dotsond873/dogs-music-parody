@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import "@/App.css";
+import axios from "axios";
 import { useVideoGeneration } from "./hooks/useVideoGeneration";
 import { useFileUpload } from "./hooks/useFileUpload";
 import { UploadSection, MediaPreviewGrid } from "./components/UploadSection";
@@ -41,6 +42,29 @@ function App() {
     const uploaded = await uploadFiles([file], "audio");
     if (uploaded.length > 0) {
       setAudioFile(uploaded[0]);
+    }
+  };
+
+  const handleYouTubeAudio = async (youtubeUrl) => {
+    if (!youtubeUrl) return;
+    
+    setUploadProgress("Extracting audio from YouTube...");
+    
+    try {
+      const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || window.location.origin;
+      const API = `${BACKEND_URL}/api`;
+      
+      const response = await axios.post(`${API}/youtube-audio`, {
+        youtube_url: youtubeUrl
+      });
+
+      setAudioFile(response.data);
+      setUploadProgress("");
+      alert(`✓ Audio extracted: ${response.data.original_filename}`);
+    } catch (error) {
+      console.error('YouTube audio extraction failed:', error);
+      alert('Failed to extract audio from YouTube. Please check the URL and try again.');
+      setUploadProgress("");
     }
   };
 
@@ -107,16 +131,51 @@ function App() {
             </div>
 
             {/* Audio Upload */}
-            <UploadSection
-              title="2. UPLOAD MUSIC"
-              subtitle="Your favorite song"
-              accept="audio/*"
-              multiple={false}
-              onUpload={handleAudioUpload}
-              uploading={uploading}
-              uploadedFile={audioFile}
-              testId="audio-upload-section"
-            />
+            <div className="neo-card p-6 md:p-8" data-testid="audio-upload-section">
+              <h3 
+                className="text-2xl md:text-3xl font-bold tracking-tight mb-4"
+                style={{ fontFamily: "'Bricolage Grotesque', sans-serif" }}
+              >
+                2. UPLOAD MUSIC
+              </h3>
+              
+              {/* YouTube URL Input */}
+              <div className="mb-4">
+                <input
+                  type="text"
+                  placeholder="Paste YouTube URL here (e.g., youtube.com/watch?v=...)"
+                  className="w-full px-4 py-3 text-base border-2 border-black focus:outline-none focus:shadow-[4px_4px_0px_0px_#FFB6C1] transition-shadow mb-2"
+                  style={{ backgroundColor: "white" }}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && e.target.value.trim()) {
+                      handleYouTubeAudio(e.target.value.trim());
+                      e.target.value = '';
+                    }
+                  }}
+                  disabled={uploading}
+                  data-testid="youtube-url-input"
+                />
+                <p className="text-xs font-semibold uppercase" style={{ color: "#404040" }}>
+                  Press Enter to extract audio from YouTube
+                </p>
+              </div>
+
+              <div className="text-center my-4 font-bold" style={{ color: "#0A0A0A" }}>
+                OR
+              </div>
+
+              {/* File Upload */}
+              <UploadSection
+                title=""
+                subtitle="Upload your own audio file"
+                accept="audio/*"
+                multiple={false}
+                onUpload={handleAudioUpload}
+                uploading={uploading}
+                uploadedFile={audioFile}
+                testId="audio-file-upload"
+              />
+            </div>
 
             {/* Prompt Input */}
             <div className="neo-card p-6 md:p-8" data-testid="prompt-section">
