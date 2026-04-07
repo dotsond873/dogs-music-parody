@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react';
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
-const API = `${BACKEND_URL}/api`;
+const getApiUrl = () => {
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || window.location.origin;
+  return `${backendUrl}/api`;
+};
 
 export const useVideoGeneration = () => {
   const [videos, setVideos] = useState([]);
@@ -11,7 +13,7 @@ export const useVideoGeneration = () => {
 
   const loadVideos = useCallback(async () => {
     try {
-      const response = await axios.get(`${API}/videos`);
+      const response = await axios.get(`${getApiUrl()}/videos`);
       setVideos(response.data);
     } catch (error) {
       console.error('Failed to load videos:', error);
@@ -21,7 +23,7 @@ export const useVideoGeneration = () => {
   const pollVideoStatus = useCallback((videoId) => {
     const interval = setInterval(async () => {
       try {
-        const response = await axios.get(`${API}/videos/${videoId}`);
+        const response = await axios.get(`${getApiUrl()}/videos/${videoId}`);
         setCurrentVideo(response.data);
 
         if (response.data.status === 'completed' || response.data.status === 'failed') {
@@ -41,7 +43,7 @@ export const useVideoGeneration = () => {
     setGenerating(true);
 
     try {
-      const response = await axios.post(`${API}/generate-video`, {
+      const response = await axios.post(`${getApiUrl()}/generate-video`, {
         subject_media_ids: subjectFileIds,
         audio_file_id: audioFileId,
         prompt: prompt,

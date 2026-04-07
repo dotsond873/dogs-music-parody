@@ -1,7 +1,9 @@
 import React from 'react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
-const API = `${BACKEND_URL}/api`;
+const getApiUrl = () => {
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || window.location.origin;
+  return `${backendUrl}/api`;
+};
 
 const GeneratingStatus = () => (
   <div 
@@ -23,7 +25,7 @@ const CompletedVideo = ({ videoId, prompt }) => (
     <video
       controls
       className="video-player"
-      src={`${API}/video-file/${videoId}`}
+      src={`${getApiUrl()}/video-file/${videoId}`}
       data-testid="video-player"
     />
     <div className="mt-4 p-4 border-2 border-black" style={{ backgroundColor: "#98FB98" }}>

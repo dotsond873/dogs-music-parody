@@ -1,7 +1,9 @@
 import React from 'react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
-const API = `${BACKEND_URL}/api`;
+const getApiUrl = () => {
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || window.location.origin;
+  return `${backendUrl}/api`;
+};
 
 export const UploadSection = ({ 
   title, 
@@ -48,9 +50,6 @@ export const UploadSection = ({
 };
 
 export const MediaPreviewGrid = ({ files, onRemove }) => {
-  const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
-  const API = `${BACKEND_URL}/api`;
-  
   if (files.length === 0) return null;
 
   return (
@@ -59,13 +58,13 @@ export const MediaPreviewGrid = ({ files, onRemove }) => {
         <div key={file.id} className="relative">
           {file.media_type === "image" ? (
             <img
-              src={`${API}/files/${file.id}`}
+              src={`${getApiUrl().replace('/api', '')}/api/files/${file.id}`}
               alt="Subject"
               className="media-preview"
             />
           ) : (
             <video
-              src={`${API}/files/${file.id}`}
+              src={`${getApiUrl().replace('/api', '')}/api/files/${file.id}`}
               className="media-preview"
             />
           )}

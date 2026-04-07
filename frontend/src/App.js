@@ -6,9 +6,6 @@ import { UploadSection, MediaPreviewGrid } from "./components/UploadSection";
 import { VideoPreview } from "./components/VideoPreview";
 import { VideoHistory } from "./components/VideoHistory";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
-const API = `${BACKEND_URL}/api`;
-
 function App() {
   const [subjectFiles, setSubjectFiles] = useState([]);
   const [audioFile, setAudioFile] = useState(null);

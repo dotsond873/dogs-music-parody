@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
-const API = `${BACKEND_URL}/api`;
+const getApiUrl = () => {
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || window.location.origin;
+  return `${backendUrl}/api`;
+};
 
 export const useFileUpload = () => {
   const [uploading, setUploading] = useState(false);
@@ -19,7 +21,7 @@ export const useFileUpload = () => {
         formData.append('file', file);
         const type = file.type.startsWith('video/') ? 'video' : mediaType;
         
-        const response = await axios.post(`${API}/upload-media?media_type=${type}`, formData, {
+        const response = await axios.post(`${getApiUrl()}/upload-media?media_type=${type}`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         uploadedFiles.push(response.data);
