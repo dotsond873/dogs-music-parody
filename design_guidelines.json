@@ -1,0 +1,116 @@
+{
+  "theme": "Light",
+  "archetype": "3 (Pastel & Soft) with Neo-Brutalist contrast",
+  "design_philosophy": "A playful, high-energy, quirky aesthetic perfect for Gen Z and meme creators. We are combining soft pastel background colors with aggressive, hard 2px black borders and solid drop shadows (Neo-Brutalism) to give the application a 'fun, ridiculous' vibe suited for dogs singing rap songs. Emphasize large typography, stark contrasts, and chunky UI elements.",
+  "colors": {
+    "background": {
+      "primary": "#FFF4D2",
+      "secondary": "#FAF9F6",
+      "tertiary": "#E0F2FE"
+    },
+    "text": {
+      "primary": "#0A0A0A",
+      "secondary": "#404040",
+      "accent": "#0A0A0A"
+    },
+    "brand": {
+      "primary": "#FFB6C1",
+      "secondary": "#98FB98",
+      "accent": "#87CEEB",
+      "highlight": "#FFD700"
+    },
+    "borders": {
+      "default": "#0A0A0A",
+      "muted": "#171717"
+    },
+    "shadows": {
+      "solid": "#0A0A0A"
+    },
+    "rules": [
+      "Never use soft, blurred shadows. All shadows MUST be solid color offsets (e.g., box-shadow: 4px 4px 0px 0px #0A0A0A).",
+      "Use bold 2px or 3px solid black borders on all interactive elements, cards, and containers.",
+      "Hover states should translate the element slightly (e.g., -translate-x-1 -translate-y-1) and increase the solid shadow offset."
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "heading": "Bricolage Grotesque, sans-serif",
+      "body": "Figtree, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scales": {
+      "h1": "text-5xl md:text-6xl font-black tracking-tight uppercase",
+      "h2": "text-4xl md:text-5xl font-extrabold tracking-tight",
+      "h3": "text-2xl md:text-3xl font-bold tracking-tight",
+      "h4": "text-xl font-bold",
+      "body": "text-base md:text-lg font-medium",
+      "small": "text-sm font-semibold uppercase tracking-wider"
+    },
+    "rules": [
+      "Headings should be massive, bold, and often uppercase to mimic a music video poster.",
+      "Use Bricolage Grotesque for an expressive, slightly chaotic but readable neo-brutalist feel.",
+      "Ensure extremely high contrast: text is almost always #0A0A0A."
+    ]
+  },
+  "spacing_and_layout": {
+    "strategy": "The 'Tetris' Grid - Mode A",
+    "container_padding": "p-8 md:p-12 lg:p-16",
+    "gap": "gap-6 md:gap-8",
+    "rules": [
+      "Containers with borders must have internal padding (p-6 or p-8) to prevent text collision.",
+      "Leave negative space around the video player and forms. Don't center everything perfectly; use slight asymmetry for a quirky look.",
+      "Embrace 'cardless' looks for text, but heavy 'cards' for functional units like the video generator and upload zones."
+    ]
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#FFB6C1] text-[#0A0A0A] border-2 border-[#0A0A0A] shadow-[4px_4px_0px_0px_#0A0A0A] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_#0A0A0A] transition-all font-bold px-8 py-4 uppercase tracking-wide",
+      "secondary": "bg-[#98FB98] text-[#0A0A0A] border-2 border-[#0A0A0A] shadow-[4px_4px_0px_0px_#0A0A0A] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_#0A0A0A] transition-all font-bold px-6 py-3",
+      "disabled": "bg-gray-200 text-gray-500 border-2 border-gray-400 cursor-not-allowed"
+    },
+    "cards": {
+      "default": "bg-white border-2 border-[#0A0A0A] shadow-[6px_6px_0px_0px_#0A0A0A] p-6 md:p-8 rounded-none"
+    },
+    "inputs": {
+      "default": "bg-white border-2 border-[#0A0A0A] px-4 py-3 text-lg focus:outline-none focus:ring-0 focus:shadow-[4px_4px_0px_0px_#FFB6C1] transition-shadow rounded-none",
+      "upload_zone": "border-4 border-dashed border-[#0A0A0A] bg-[#E0F2FE] p-12 text-center cursor-pointer hover:bg-[#87CEEB] transition-colors shadow-[6px_6px_0px_0px_#0A0A0A]"
+    },
+    "tags_and_badges": {
+      "default": "px-3 py-1 bg-[#FFD700] border border-[#0A0A0A] text-xs font-bold uppercase"
+    }
+  },
+  "motion_and_interaction": {
+    "hover_states": "All interactive elements should 'press down' (translate X and Y) and reduce shadow offset, simulating a physical mechanical button press.",
+    "transitions": "Fast and snappy transitions (duration-150 ease-out). No slow fades.",
+    "loading_states": "Use marquee scrolling text (e.g., 'DROPPING BEATS... RAPPING...') inside a thick black border for loading states instead of standard spinners."
+  },
+  "media": {
+    "images": [
+      {
+        "url": "https://images.unsplash.com/photo-1516222338250-863216ce01ea?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MTN8MHwxfHNlYXJjaHwxfHxjb29sJTIwZG9nfGVufDB8fHx8MTc3NTUyODAxOXww&ixlib=rb-4.1.0&q=85",
+        "description": "A cool brown dog wearing sunglasses on a blue background. Use as the main hero graphic or decorative element near the video generator.",
+        "category": "hero"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1721777436304-78e72a3459e1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwxfHxkb2clMjBkYW5jaW5nfGVufDB8fHx8MTc3NTUyODAyOXww&ixlib=rb-4.1.0&q=85",
+        "description": "A dog standing on a green background. Use as an accent image or inside a stylized frame.",
+        "category": "accent"
+      }
+    ],
+    "rules": [
+      "Wrap all images in thick 2px solid black borders.",
+      "If layering images, apply solid drop shadows (shadow-[4px_4px_0_0_#0A0A0A]) to the image containers."
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Build a one-page SaaS dashboard for generating the dog rap videos.",
+    "Use a Neo-Brutalist design language. This means no rounded corners (or very small ones), solid black borders, and hard solid shadows.",
+    "Create a bold Hero section introducing the tool with massive typography.",
+    "Implement a prominent 'Upload Dog Photo' dropzone using the dashed border style.",
+    "Create a 'Song Selection' area (even if just displaying 'Big Booty Hoes by Gucci Mane' as the active track in a stylized cassette or music player UI component).",
+    "Include a large, chunky 'Generate Video' button.",
+    "Include a 'Video Preview' card where the generated Sora 2 video will be displayed. When empty, show a fun placeholder state.",
+    "Do not use generic gray loaders. Use a scrolling marquee or blocky loading text.",
+    "All components should use Tailwind classes to enforce the hard border + offset shadow look (e.g., border-2 border-black shadow-[4px_4px_0_0_rgba(0,0,0,1)])."
+  ]
+}
