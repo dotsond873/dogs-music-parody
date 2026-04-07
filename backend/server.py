@@ -157,69 +157,76 @@ async def get_file(file_id: str):
         logger.error(f"File retrieval failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def get_sora_duration(requested_duration: int) -> int:
+    """Convert requested duration to valid Sora duration (4, 8, or 12)"""
+    if requested_duration <= 4:
+        return 4
+    elif requested_duration <= 8:
+        return 8
+    else:
+        return 12
+
+def create_user_friendly_error(error_str: str) -> str:
+    """Convert technical errors to user-friendly messages"""
+    if "insufficient_balance" in error_str or "insufficient balance" in error_str.lower():
+        return "Insufficient balance in EMERGENT_LLM_KEY. Please add balance in Profile > Universal Key > Add Balance"
+    return error_str
+
+async def update_video_status(video_id: str, status: str, **kwargs):
+    """Update video generation status in database"""
+    update_data = {"status": status, **kwargs}
+    await db.video_generations.update_one(
+        {"id": video_id},
+        {"$set": update_data}
+    )
+
+async def generate_video_with_sora(prompt: str, duration: int) -> bytes:
+    """Generate video using Sora 2"""
+    video_gen = OpenAIVideoGeneration(api_key=os.environ['EMERGENT_LLM_KEY'])
+    sora_duration = get_sora_duration(duration)
+    
+    video_bytes = video_gen.text_to_video(
+        prompt=prompt,
+        model="sora-2",
+        size="1280x720",
+        duration=sora_duration,
+        max_wait_time=900
+    )
+    return video_bytes
+
+async def save_generated_video(video_id: str, video_bytes: bytes) -> str:
+    """Save generated video to storage and return path"""
+    video_path = f"{APP_NAME}/videos/{video_id}.mp4"
+    result = put_object(video_path, video_bytes, "video/mp4")
+    return result["path"]
+
 async def generate_video_background(video_id: str, prompt: str, duration: int):
     try:
-        await db.video_generations.update_one(
-            {"id": video_id},
-            {"$set": {"status": "generating"}}
-        )
+        await update_video_status(video_id, "generating")
         
-        video_gen = OpenAIVideoGeneration(api_key=os.environ['EMERGENT_LLM_KEY'])
-        
-        sora_duration = 4
-        if duration <= 4:
-            sora_duration = 4
-        elif duration <= 8:
-            sora_duration = 8
-        else:
-            sora_duration = 12
-        
-        video_bytes = video_gen.text_to_video(
-            prompt=prompt,
-            model="sora-2",
-            size="1280x720",
-            duration=sora_duration,
-            max_wait_time=900
-        )
+        video_bytes = await generate_video_with_sora(prompt, duration)
         
         if video_bytes:
-            video_path = f"{APP_NAME}/videos/{video_id}.mp4"
-            result = put_object(video_path, video_bytes, "video/mp4")
+            video_path = await save_generated_video(video_id, video_bytes)
             
-            await db.video_generations.update_one(
-                {"id": video_id},
-                {"$set": {
-                    "status": "completed",
-                    "video_path": result["path"],
-                    "completed_at": datetime.now(timezone.utc).isoformat()
-                }}
+            await update_video_status(
+                video_id, 
+                "completed",
+                video_path=video_path,
+                completed_at=datetime.now(timezone.utc).isoformat()
             )
             logger.info(f"Video {video_id} generated successfully")
         else:
             error_msg = "Video generation returned no data"
-            await db.video_generations.update_one(
-                {"id": video_id},
-                {"$set": {
-                    "status": "failed",
-                    "error_message": error_msg
-                }}
-            )
+            await update_video_status(video_id, "failed", error_message=error_msg)
             logger.error(f"Video {video_id} failed: {error_msg}")
+            
     except Exception as e:
         error_str = str(e)
         logger.error(f"Video generation failed for {video_id}: {error_str}")
         
-        user_friendly_error = error_str
-        if "insufficient_balance" in error_str or "insufficient balance" in error_str.lower():
-            user_friendly_error = "Insufficient balance in EMERGENT_LLM_KEY. Please add balance in Profile > Universal Key > Add Balance"
-        
-        await db.video_generations.update_one(
-            {"id": video_id},
-            {"$set": {
-                "status": "failed",
-                "error_message": user_friendly_error
-            }}
-        )
+        user_friendly_error = create_user_friendly_error(error_str)
+        await update_video_status(video_id, "failed", error_message=user_friendly_error)
 
 @api_router.post("/generate-video", response_model=VideoGeneration)
 async def generate_video(request: GenerateVideoRequest):
