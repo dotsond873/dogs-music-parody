@@ -113,7 +113,7 @@ async def startup():
 # Routes
 @api_router.get("/")
 async def root():
-    return {"message": "Dancing Video Generator API"}
+    return {"message": "Dancing Dave's Swamp Donkeys and Spundunnits API"}
 
 @api_router.post("/upload-media", response_model=MediaUpload)
 async def upload_media(file: UploadFile = File(...), media_type: str = Query(...)):

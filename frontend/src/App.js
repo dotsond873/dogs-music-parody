@@ -142,13 +142,13 @@ function App() {
           style={{ fontFamily: "'Bricolage Grotesque', sans-serif", color: "#0A0A0A" }}
           data-testid="app-title"
         >
-          DANCING VIDEO GENERATOR
+          Dancing Dave's Swamp Donkeys and Spundunnits
         </h1>
         <p 
           className="text-base md:text-lg font-medium max-w-2xl mx-auto"
           style={{ color: "#404040" }}
         >
-          Upload your dogs, people, aliens - add music, describe the dance style, and watch AI bring it to life!
+          Upload your swamp donkeys, spundunnits, or whatever critters you got - add music, describe the dance style, and watch AI bring it to life!
         </p>
       </div>
 
@@ -179,7 +179,7 @@ function App() {
                   {uploading ? "UPLOADING..." : "📁 CLICK TO UPLOAD"}
                 </div>
                 <div className="text-sm mt-2" style={{ color: "#404040" }}>
-                  Images or videos of dogs, people, aliens, etc.
+                  Images or videos of swamp donkeys, spundunnits, or whatever!
                 </div>
               </label>
 
