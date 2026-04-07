@@ -104,7 +104,8 @@ function App() {
       pollVideoStatus(response.data.id);
     } catch (error) {
       console.error("Generation failed:", error);
-      alert("Video generation failed. Please try again.");
+      const errorMessage = error.response?.data?.detail || "Video generation failed. Please try again.";
+      alert(errorMessage);
       setGenerating(false);
     }
   };

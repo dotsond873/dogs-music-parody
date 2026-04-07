@@ -196,20 +196,28 @@ async def generate_video_background(video_id: str, prompt: str, duration: int):
             )
             logger.info(f"Video {video_id} generated successfully")
         else:
+            error_msg = "Video generation returned no data"
             await db.video_generations.update_one(
                 {"id": video_id},
                 {"$set": {
                     "status": "failed",
-                    "error_message": "Video generation returned no data"
+                    "error_message": error_msg
                 }}
             )
+            logger.error(f"Video {video_id} failed: {error_msg}")
     except Exception as e:
-        logger.error(f"Video generation failed: {e}")
+        error_str = str(e)
+        logger.error(f"Video generation failed for {video_id}: {error_str}")
+        
+        user_friendly_error = error_str
+        if "insufficient_balance" in error_str or "insufficient balance" in error_str.lower():
+            user_friendly_error = "Insufficient balance in EMERGENT_LLM_KEY. Please add balance in Profile > Universal Key > Add Balance"
+        
         await db.video_generations.update_one(
             {"id": video_id},
             {"$set": {
                 "status": "failed",
-                "error_message": str(e)
+                "error_message": user_friendly_error
             }}
         )
 
