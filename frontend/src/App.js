@@ -115,15 +115,38 @@ function App() {
           <div className="space-y-6">
             {/* Subject Upload */}
             <div>
-              <UploadSection
-                title="1. UPLOAD SUBJECTS"
-                subtitle="Images or videos of swamp donkeys, spundunnits, or whatever!"
-                accept="image/*,video/*"
-                multiple={true}
-                onUpload={handleSubjectUpload}
-                uploading={uploading}
-                testId="subject-upload-section"
-              />
+              <div className="neo-card p-6 md:p-8" data-testid="subject-upload-section">
+                <h3 
+                  className="text-2xl md:text-3xl font-bold tracking-tight mb-4"
+                  style={{ fontFamily: "'Bricolage Grotesque', sans-serif" }}
+                >
+                  1. UPLOAD SUBJECTS
+                </h3>
+                
+                <div className="mb-3 p-3 border-2 border-black" style={{ backgroundColor: "#98FB98" }}>
+                  <p className="text-xs font-bold uppercase">
+                    ✨ Your uploaded image will be used as the starting frame! The AI will animate YOUR dogs/subjects, not random ones.
+                  </p>
+                </div>
+                
+                <label className="upload-zone block p-12 text-center shadow-[6px_6px_0px_0px_#0A0A0A]">
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,video/*"
+                    onChange={handleSubjectUpload}
+                    className="hidden"
+                    disabled={uploading}
+                    data-testid="subject-file-input"
+                  />
+                  <div className="text-lg font-bold uppercase" style={{ color: "#0A0A0A" }}>
+                    {uploading ? "UPLOADING..." : "📁 CLICK TO UPLOAD"}
+                  </div>
+                  <div className="text-sm mt-2" style={{ color: "#404040" }}>
+                    Images or videos of swamp donkeys, spundunnits, or whatever!
+                  </div>
+                </label>
+              </div>
               <MediaPreviewGrid 
                 files={subjectFiles} 
                 onRemove={removeSubjectFile}
@@ -194,12 +217,15 @@ function App() {
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="E.g., Three dogs wearing sunglasses dancing hip-hop style with confident swagger, spinning and doing the moonwalk..."
+                placeholder="E.g., The three dogs are now wearing hip-hop clothing with baggy pants and gold chains. They dance with swagger, spinning and doing the moonwalk to the beat..."
                 className="w-full px-4 py-3 text-lg border-2 border-black focus:outline-none focus:shadow-[4px_4px_0px_0px_#FFB6C1] transition-shadow"
                 style={{ backgroundColor: "white", minHeight: "120px" }}
                 disabled={generating}
                 data-testid="prompt-textarea"
               />
+              <p className="text-xs mt-2 font-semibold" style={{ color: "#404040" }}>
+                💡 Describe how your subjects should move and what they should wear. The AI will add the clothing and animate them!
+              </p>
             </div>
 
             {/* Generate Button */}
