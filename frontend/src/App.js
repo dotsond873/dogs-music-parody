@@ -139,6 +139,12 @@ function App() {
                 2. UPLOAD MUSIC
               </h3>
               
+              <div className="mb-3 p-3 border-2 border-black" style={{ backgroundColor: "#FFD700" }}>
+                <p className="text-xs font-bold uppercase">
+                  ⚠️ Your music will be added to the generated video!
+                </p>
+              </div>
+              
               {/* YouTube URL Input */}
               <div className="mb-4">
                 <input
@@ -167,7 +173,7 @@ function App() {
               {/* File Upload */}
               <UploadSection
                 title=""
-                subtitle="Upload your own audio file"
+                subtitle="Upload your own audio file (MP3, WAV, etc.)"
                 accept="audio/*"
                 multiple={false}
                 onUpload={handleAudioUpload}

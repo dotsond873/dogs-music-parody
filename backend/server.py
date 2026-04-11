@@ -14,6 +14,7 @@ import requests
 import asyncio
 import yt_dlp
 import tempfile
+import subprocess
 from emergentintegrations.llm.openai.video_generation import OpenAIVideoGeneration
 
 ROOT_DIR = Path(__file__).parent
@@ -271,13 +272,68 @@ async def save_generated_video(video_id: str, video_bytes: bytes) -> str:
     result = put_object(video_path, video_bytes, "video/mp4")
     return result["path"]
 
-async def generate_video_background(video_id: str, prompt: str, duration: int):
+async def combine_video_with_audio(video_bytes: bytes, audio_file_id: Optional[str]) -> bytes:
+    """Combine generated video with user's audio using FFmpeg"""
+    if not audio_file_id:
+        return video_bytes
+    
+    try:
+        # Get audio file from storage
+        audio_record = await db.media_uploads.find_one({"id": audio_file_id, "is_deleted": False}, {"_id": 0})
+        if not audio_record:
+            logger.warning(f"Audio file {audio_file_id} not found, returning video without audio")
+            return video_bytes
+        
+        audio_data, _ = get_object(audio_record["storage_path"])
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Save video and audio to temp files
+            video_path = f"{temp_dir}/video.mp4"
+            audio_path = f"{temp_dir}/audio.mp3"
+            output_path = f"{temp_dir}/output.mp4"
+            
+            with open(video_path, 'wb') as f:
+                f.write(video_bytes)
+            with open(audio_path, 'wb') as f:
+                f.write(audio_data)
+            
+            # Use FFmpeg to combine video with audio
+            import subprocess
+            cmd = [
+                'ffmpeg',
+                '-i', video_path,
+                '-i', audio_path,
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-shortest',
+                '-y',
+                output_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=60)
+            
+            if result.returncode == 0 and os.path.exists(output_path):
+                with open(output_path, 'rb') as f:
+                    return f.read()
+            else:
+                logger.error(f"FFmpeg failed: {result.stderr.decode()}")
+                return video_bytes
+                
+    except Exception as e:
+        logger.error(f"Failed to combine video with audio: {e}")
+        return video_bytes
+
+async def generate_video_background(video_id: str, prompt: str, duration: int, audio_file_id: Optional[str] = None):
     try:
         await update_video_status(video_id, "generating")
         
         video_bytes = await generate_video_with_sora(prompt, duration)
         
         if video_bytes:
+            # Combine with user's audio if provided
+            if audio_file_id:
+                video_bytes = await combine_video_with_audio(video_bytes, audio_file_id)
+            
             video_path = await save_generated_video(video_id, video_bytes)
             
             await update_video_status(
@@ -313,7 +369,12 @@ async def generate_video(request: GenerateVideoRequest):
         doc = video_gen.model_dump()
         await db.video_generations.insert_one(doc)
         
-        asyncio.create_task(generate_video_background(video_gen.id, request.prompt, request.duration))
+        asyncio.create_task(generate_video_background(
+            video_gen.id, 
+            request.prompt, 
+            request.duration,
+            request.audio_file_id
+        ))
         
         return video_gen
     except Exception as e:
