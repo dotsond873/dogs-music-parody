@@ -240,8 +240,17 @@ def get_sora_duration(requested_duration: int) -> int:
 
 def create_user_friendly_error(error_str: str) -> str:
     """Convert technical errors to user-friendly messages"""
-    if "insufficient_balance" in error_str or "insufficient balance" in error_str.lower():
-        return "Insufficient balance in EMERGENT_LLM_KEY. Please add balance in Profile > Universal Key > Add Balance"
+    error_lower = error_str.lower()
+    
+    if "insufficient_balance" in error_lower or "insufficient balance" in error_lower:
+        return "⚠️ Insufficient balance in Universal Key. Go to Profile → Universal Key → Add Balance to continue generating videos."
+    
+    if "budget_exceeded" in error_lower or "budget has been exceeded" in error_lower:
+        return "⚠️ Budget limit reached! Add more balance to your Universal Key in Profile → Universal Key → Add Balance."
+    
+    if "400" in error_str and "bad request" in error_lower:
+        return f"⚠️ API Error: {error_str}. This might be a balance issue - check your Universal Key balance."
+    
     return error_str
 
 async def update_video_status(video_id: str, status: str, **kwargs):
