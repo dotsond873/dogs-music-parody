@@ -15,6 +15,7 @@ import asyncio
 import yt_dlp
 import tempfile
 import subprocess
+import base64
 from emergentintegrations.llm.openai.video_generation import OpenAIVideoGeneration
 
 ROOT_DIR = Path(__file__).parent
@@ -263,10 +264,21 @@ async def update_video_status(video_id: str, status: str, **kwargs):
 
 async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids: List[str]) -> bytes:
     """Generate video using Sora 2 with optional image input"""
-    sora_duration = get_sora_duration(duration)
+    import base64
     
-    # If subject images are provided, save the first one to a temp file
-    temp_image_path = None
+    sora_duration = get_sora_duration(duration)
+    api_key = os.environ['EMERGENT_LLM_KEY']
+    url = "https://integrations.emergentagent.com/llm/openai/v1/videos"
+    
+    # Build payload
+    payload = {
+        "model": "sora-2",
+        "prompt": prompt,
+        "size": "1280x720",
+        "seconds": str(sora_duration)
+    }
+    
+    # If subject images are provided, add as input_reference
     if subject_media_ids and len(subject_media_ids) > 0:
         try:
             # Get the first uploaded image
@@ -277,36 +289,75 @@ async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids
             if media_record and media_record.get("media_type") == "image":
                 image_data, _ = get_object(media_record["storage_path"])
                 
-                # Save to temp file for the library
-                import tempfile
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-                temp_file.write(image_data)
-                temp_file.close()
-                temp_image_path = temp_file.name
+                # Encode image to base64
+                encoded_image = base64.b64encode(image_data).decode("utf-8")
+                mime_type = media_record.get("content_type", "image/jpeg")
+                
+                # Add to payload with correct parameter name
+                payload["input_reference"] = {
+                    "data": f"data:{mime_type};base64,{encoded_image}"
+                }
                 
                 logger.info(f"Using uploaded image as input: {media_record['original_filename']}")
         except Exception as e:
             logger.warning(f"Failed to load image for input: {e}")
     
     try:
-        # Generate video using library (supports both text-to-video and image-to-video)
-        video_gen = OpenAIVideoGeneration(api_key=os.environ['EMERGENT_LLM_KEY'])
+        # Initiate video generation
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
         
-        video_bytes = video_gen.text_to_video(
-            prompt=prompt,
-            model="sora-2",
-            size="1280x720",
-            duration=sora_duration,
-            max_wait_time=900,
-            image_path=temp_image_path,
-            mime_type="image/jpeg"
-        )
+        logger.info(f"Starting video generation with prompt: {prompt[:50]}...")
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
         
-        return video_bytes
-    finally:
-        # Clean up temp file
-        if temp_image_path and os.path.exists(temp_image_path):
-            os.unlink(temp_image_path)
+        result = response.json()
+        video_id = result.get('id')
+        
+        if not video_id:
+            logger.error(f"No video ID in response: {result}")
+            return None
+        
+        logger.info(f"Video generation initiated with ID: {video_id}")
+        
+        # Poll for completion
+        max_wait = 900
+        poll_interval = 10
+        elapsed = 0
+        
+        while elapsed < max_wait:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            
+            status_response = requests.get(
+                f"{url}/{video_id}",
+                headers=headers,
+                timeout=30
+            )
+            status_response.raise_for_status()
+            status_data = status_response.json()
+            
+            status = status_data.get('status')
+            logger.info(f"Video generation status: {status} ({elapsed}s elapsed)")
+            
+            if status == 'completed':
+                # Download video
+                video_url = f"{url}/{video_id}/content"
+                video_response = requests.get(video_url, headers=headers, timeout=120)
+                video_response.raise_for_status()
+                logger.info(f"Video downloaded successfully: {len(video_response.content)} bytes")
+                return video_response.content
+            elif status == 'failed':
+                error = status_data.get('error', 'Unknown error')
+                raise Exception(f"Video generation failed: {error}")
+        
+        raise Exception("Video generation timeout")
+        
+    except Exception as e:
+        logger.error(f"Error in video generation: {e}")
+        raise
 
 async def save_generated_video(video_id: str, video_bytes: bytes) -> str:
     """Save generated video to storage and return path"""
