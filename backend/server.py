@@ -264,21 +264,21 @@ async def update_video_status(video_id: str, status: str, **kwargs):
 
 async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids: List[str]) -> bytes:
     """Generate video using Sora 2 with optional image input"""
-    import base64
-    
     sora_duration = get_sora_duration(duration)
     api_key = os.environ['EMERGENT_LLM_KEY']
     url = "https://integrations.emergentagent.com/llm/openai/v1/videos"
     
-    # Build payload
-    payload = {
+    # Build form data
+    data = {
         "model": "sora-2",
         "prompt": prompt,
         "size": "1280x720",
         "seconds": str(sora_duration)
     }
     
-    # If subject images are provided, add as input_reference
+    files = {}
+    
+    # If subject images are provided, add as input_reference file upload
     if subject_media_ids and len(subject_media_ids) > 0:
         try:
             # Get the first uploaded image
@@ -288,29 +288,29 @@ async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids
             )
             if media_record and media_record.get("media_type") == "image":
                 image_data, _ = get_object(media_record["storage_path"])
-                
-                # Encode image to base64
-                encoded_image = base64.b64encode(image_data).decode("utf-8")
                 mime_type = media_record.get("content_type", "image/jpeg")
+                filename = media_record.get("original_filename", "image.jpg")
                 
-                # Add to payload with correct parameter name
-                payload["input_reference"] = {
-                    "data": f"data:{mime_type};base64,{encoded_image}"
-                }
+                # Add as file upload in multipart form
+                files["input_reference"] = (filename, image_data, mime_type)
                 
-                logger.info(f"Using uploaded image as input: {media_record['original_filename']}")
+                logger.info(f"Using uploaded image as input: {filename}")
         except Exception as e:
             logger.warning(f"Failed to load image for input: {e}")
     
     try:
-        # Initiate video generation
+        # Initiate video generation with multipart form-data
         headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Authorization": f"Bearer {api_key}"
         }
         
         logger.info(f"Starting video generation with prompt: {prompt[:50]}...")
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, data=data, files=files if files else None, timeout=30)
+        
+        if response.status_code != 200:
+            logger.error(f"Video generation failed with status {response.status_code}")
+            logger.error(f"Response: {response.text}")
+        
         response.raise_for_status()
         
         result = response.json()
