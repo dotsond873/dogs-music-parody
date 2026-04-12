@@ -131,9 +131,9 @@ function MainApp() {
     setUploading(true); setStatusMsg("Uploading audio...");
     try {
       const fd = new FormData(); fd.append("file", file);
-      const r = await axios.post(`${API}/upload-media?media_type=audio`, fd);
+      const r = await axios.post(`${API}/upload-media?media_type=audio`, fd, { timeout: 120000 });
       setAudioFile(r.data); setStatusMsg("");
-    } catch (e) { alert("Audio upload failed."); } finally { setUploading(false); }
+    } catch (e) { alert("Audio upload failed."); setStatusMsg(""); } finally { setUploading(false); }
   };
 
   const handleYouTube = async () => {
@@ -224,7 +224,18 @@ function MainApp() {
             {/* Music */}
             <div className="neo-card p-4 md:p-5" data-testid="audio-upload-section">
               <h3 className="text-lg md:text-xl font-bold tracking-tight mb-2 gold-text">2. PICK YOUR MUSIC</h3>
-              <div className="flex gap-2 mb-3">
+
+              {/* Primary: Upload audio file */}
+              <label className="upload-zone block p-6 text-center cursor-pointer mb-3">
+                <input type="file" accept="audio/*,video/*" onChange={handleAudioUpload} className="hidden" disabled={uploading}
+                       data-testid="audio-file-input" />
+                <div className="text-sm font-bold uppercase gold-text">{audioFile ? audioFile.original_filename : "TAP TO UPLOAD YOUR SONG"}</div>
+                <div className="text-xs mt-1" style={{ color: "#888" }}>MP3, M4A, or any audio/video file from your phone</div>
+              </label>
+
+              {/* Secondary: YouTube (with disclaimer) */}
+              <div className="text-center text-xs font-bold mb-2" style={{ color: "#666" }}>OR TRY YOUTUBE (some songs blocked)</div>
+              <div className="flex gap-2 mb-2">
                 <input type="text" value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)}
                        placeholder="Paste YouTube URL..."
                        className="flex-1 px-3 py-2 text-xs border-2 border-gray-600 focus:border-yellow-500 focus:outline-none bg-black text-white"
@@ -236,12 +247,7 @@ function MainApp() {
                   {extracting ? "..." : "GET"}
                 </button>
               </div>
-              <div className="text-center text-xs font-bold mb-2" style={{ color: "#666" }}>OR</div>
-              <label className="upload-zone block p-4 text-center cursor-pointer">
-                <input type="file" accept="audio/*" onChange={handleAudioUpload} className="hidden" disabled={uploading}
-                       data-testid="audio-file-input" />
-                <div className="text-xs font-bold uppercase gold-text">{audioFile ? audioFile.original_filename : "TAP TO UPLOAD AUDIO"}</div>
-              </label>
+
               {audioFile && (
                 <div className="mt-2 p-2 border border-green-700 text-xs font-bold" style={{ backgroundColor: "rgba(0,128,0,0.15)", color: "#4ADE80" }}
                      data-testid="audio-loaded">
