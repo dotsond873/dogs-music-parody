@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query, Header
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query
 from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -15,66 +15,53 @@ import asyncio
 import yt_dlp
 import tempfile
 import subprocess
-import base64
-from emergentintegrations.llm.openai.video_generation import OpenAIVideoGeneration
+from io import BytesIO
+from PIL import Image
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Storage configuration
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = "dancing-video-generator"
 storage_key = None
 
-# Create the main app
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Storage functions
+# ─── Storage ───────────────────────────────────────────────────────────
+
 def init_storage():
     global storage_key
     if storage_key:
         return storage_key
-    try:
-        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-        resp.raise_for_status()
-        storage_key = resp.json()["storage_key"]
-        logger.info("Storage initialized successfully")
-        return storage_key
-    except Exception as e:
-        logger.error(f"Storage init failed: {e}")
-        raise
+    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
+    resp.raise_for_status()
+    storage_key = resp.json()["storage_key"]
+    logger.info("Storage initialized")
+    return storage_key
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
     key = init_storage()
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data, timeout=120
-    )
+    resp = requests.put(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key, "Content-Type": content_type}, data=data, timeout=120)
     resp.raise_for_status()
     return resp.json()
 
 def get_object(path: str) -> tuple:
     key = init_storage()
-    resp = requests.get(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key}, timeout=60
-    )
+    resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
-# Models
+# ─── Models ────────────────────────────────────────────────────────────
+
 class MediaUpload(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -108,410 +95,239 @@ class GenerateVideoRequest(BaseModel):
 class YouTubeAudioRequest(BaseModel):
     youtube_url: str
 
-# Startup event
+# ─── Image resize ──────────────────────────────────────────────────────
+
+def resize_image_to_1280x720(image_bytes: bytes) -> bytes:
+    """Resize any image to exactly 1280x720 (required by Sora 2)"""
+    img = Image.open(BytesIO(image_bytes))
+    img = img.convert("RGB")
+    img = img.resize((1280, 720), Image.LANCZOS)
+    buf = BytesIO()
+    img.save(buf, format="JPEG", quality=95)
+    buf.seek(0)
+    logger.info(f"Resized image to 1280x720 ({len(buf.getvalue())} bytes)")
+    return buf.getvalue()
+
+# ─── Sora 2 video generation ──────────────────────────────────────────
+
+def get_sora_duration(d: int) -> int:
+    if d <= 4: return 4
+    if d <= 8: return 8
+    return 12
+
+def friendly_error(e: str) -> str:
+    el = e.lower()
+    if "insufficient_balance" in el or "insufficient balance" in el:
+        return "Insufficient balance. Go to Profile > Universal Key > Add Balance."
+    if "budget_exceeded" in el or "budget has been exceeded" in el:
+        return "Budget limit reached! Add more balance in Profile > Universal Key > Add Balance."
+    if "inpaint image must match" in el:
+        return "Image size mismatch (auto-resize should fix this). Try again."
+    return e
+
+async def update_video_status(vid: str, status: str, **kw):
+    await db.video_generations.update_one({"id": vid}, {"$set": {"status": status, **kw}})
+
+async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids: List[str]) -> bytes:
+    """Generate video using Sora 2 — resizes image to 1280x720 first"""
+    sora_dur = get_sora_duration(duration)
+    api_key = os.environ['EMERGENT_LLM_KEY']
+    url = "https://integrations.emergentagent.com/llm/openai/v1/videos"
+
+    form_data = {"model": "sora-2", "prompt": prompt, "size": "1280x720", "seconds": str(sora_dur)}
+    files = None
+
+    # Load + resize the first uploaded image
+    if subject_media_ids:
+        try:
+            rec = await db.media_uploads.find_one({"id": subject_media_ids[0], "is_deleted": False}, {"_id": 0})
+            if rec and rec.get("media_type") == "image":
+                raw, _ = get_object(rec["storage_path"])
+                resized = resize_image_to_1280x720(raw)
+                files = {"input_reference": ("subject.jpg", resized, "image/jpeg")}
+                logger.info(f"Prepared resized image for Sora 2")
+        except Exception as exc:
+            logger.warning(f"Image prep failed, falling back to text-only: {exc}")
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    # Initiate generation
+    logger.info(f"Sending to Sora 2: prompt={prompt[:60]}... dur={sora_dur} image={'yes' if files else 'no'}")
+    resp = requests.post(url, headers=headers, data=form_data, files=files, timeout=60)
+
+    if resp.status_code != 200:
+        logger.error(f"Sora 2 init failed [{resp.status_code}]: {resp.text}")
+        resp.raise_for_status()
+
+    video_id = resp.json().get("id")
+    if not video_id:
+        raise Exception(f"No video ID returned: {resp.text}")
+
+    logger.info(f"Sora 2 job started: {video_id}")
+
+    # Poll until done
+    for elapsed in range(10, 910, 10):
+        await asyncio.sleep(10)
+        sr = requests.get(f"{url}/{video_id}", headers=headers, timeout=30)
+        sr.raise_for_status()
+        sd = sr.json()
+        st = sd.get("status", "unknown")
+        logger.info(f"  [{elapsed}s] status={st}")
+
+        if st == "completed":
+            dl = requests.get(f"{url}/{video_id}/content", headers=headers, timeout=120)
+            dl.raise_for_status()
+            logger.info(f"Downloaded video: {len(dl.content)} bytes")
+            return dl.content
+        if st == "failed":
+            raise Exception(f"Sora 2 failed: {sd.get('error', sd)}")
+
+    raise Exception("Sora 2 timed out after 15 minutes")
+
+async def merge_audio(video_bytes: bytes, audio_file_id: Optional[str]) -> bytes:
+    """Replace video audio with user's song using FFmpeg"""
+    if not audio_file_id:
+        return video_bytes
+    try:
+        rec = await db.media_uploads.find_one({"id": audio_file_id, "is_deleted": False}, {"_id": 0})
+        if not rec:
+            return video_bytes
+        audio_data, _ = get_object(rec["storage_path"])
+        with tempfile.TemporaryDirectory() as td:
+            vp, ap, op = f"{td}/v.mp4", f"{td}/a.mp3", f"{td}/out.mp4"
+            with open(vp, 'wb') as f: f.write(video_bytes)
+            with open(ap, 'wb') as f: f.write(audio_data)
+            r = subprocess.run([
+                'ffmpeg', '-i', vp, '-i', ap,
+                '-map', '0:v', '-map', '1:a',
+                '-c:v', 'copy', '-c:a', 'aac', '-shortest', '-y', op
+            ], capture_output=True, timeout=60)
+            if r.returncode == 0 and os.path.exists(op):
+                with open(op, 'rb') as f:
+                    logger.info("Audio merged successfully")
+                    return f.read()
+            logger.error(f"FFmpeg error: {r.stderr.decode()[:300]}")
+    except Exception as exc:
+        logger.error(f"Audio merge failed: {exc}")
+    return video_bytes
+
+async def generate_video_background(vid: str, prompt: str, duration: int, audio_file_id: Optional[str], subject_media_ids: Optional[List[str]]):
+    try:
+        await update_video_status(vid, "generating")
+        vb = await generate_video_with_sora(prompt, duration, subject_media_ids or [])
+        if not vb:
+            await update_video_status(vid, "failed", error_message="Video generation returned no data")
+            return
+        if audio_file_id:
+            vb = await merge_audio(vb, audio_file_id)
+        path = f"{APP_NAME}/videos/{vid}.mp4"
+        result = put_object(path, vb, "video/mp4")
+        await update_video_status(vid, "completed", video_path=result["path"], completed_at=datetime.now(timezone.utc).isoformat())
+        logger.info(f"Video {vid} completed!")
+    except Exception as exc:
+        logger.error(f"Video {vid} failed: {exc}")
+        await update_video_status(vid, "failed", error_message=friendly_error(str(exc)))
+
+# ─── Routes ────────────────────────────────────────────────────────────
+
 @app.on_event("startup")
 async def startup():
     try:
         init_storage()
-        logger.info("Application started, storage initialized")
+        logger.info("App started, storage ready")
     except Exception as e:
         logger.error(f"Startup failed: {e}")
 
-# Routes
 @api_router.get("/")
 async def root():
     return {"message": "Dancing Dave's Swamp Donkeys and Spundunnits API"}
 
 @api_router.post("/upload-media", response_model=MediaUpload)
 async def upload_media(file: UploadFile = File(...), media_type: str = Query(...)):
-    try:
-        ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
-        file_id = str(uuid.uuid4())
-        path = f"{APP_NAME}/uploads/{file_id}.{ext}"
-        
-        data = await file.read()
-        result = put_object(path, data, file.content_type or "application/octet-stream")
-        
-        media_upload = MediaUpload(
-            id=file_id,
-            storage_path=result["path"],
-            original_filename=file.filename,
-            content_type=file.content_type or "application/octet-stream",
-            size=result["size"],
-            media_type=media_type
-        )
-        
-        doc = media_upload.model_dump()
-        await db.media_uploads.insert_one(doc)
-        
-        return media_upload
-    except Exception as e:
-        logger.error(f"Upload failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
+    fid = str(uuid.uuid4())
+    data = await file.read()
+    result = put_object(f"{APP_NAME}/uploads/{fid}.{ext}", data, file.content_type or "application/octet-stream")
+    mu = MediaUpload(id=fid, storage_path=result["path"], original_filename=file.filename,
+                     content_type=file.content_type or "application/octet-stream", size=result["size"], media_type=media_type)
+    await db.media_uploads.insert_one(mu.model_dump())
+    return mu
 
 @api_router.get("/files/{file_id}")
 async def get_file(file_id: str):
-    try:
-        record = await db.media_uploads.find_one({"id": file_id, "is_deleted": False}, {"_id": 0})
-        if not record:
-            raise HTTPException(status_code=404, detail="File not found")
-        
-        data, content_type = get_object(record["storage_path"])
-        return Response(content=data, media_type=record.get("content_type", content_type))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"File retrieval failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    rec = await db.media_uploads.find_one({"id": file_id, "is_deleted": False}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "File not found")
+    data, ct = get_object(rec["storage_path"])
+    return Response(content=data, media_type=rec.get("content_type", ct))
 
 @api_router.post("/youtube-audio", response_model=MediaUpload)
 async def extract_youtube_audio(request: YouTubeAudioRequest):
-    try:
-        youtube_url = request.youtube_url
-        file_id = str(uuid.uuid4())
-        
-        # Create temp directory for download
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_template = f"{temp_dir}/audio.%(ext)s"
-            
-            # yt-dlp options
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': output_template,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'quiet': True,
-                'no_warnings': True,
-            }
-            
-            # Download and extract audio
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(youtube_url, download=True)
-                video_title = info.get('title', 'youtube_audio')
-            
-            # Find the downloaded audio file
-            audio_path = f"{temp_dir}/audio.mp3"
-            if not os.path.exists(audio_path):
-                # Try to find any audio file in the directory
-                files = os.listdir(temp_dir)
-                for f in files:
-                    if f.endswith('.mp3'):
-                        audio_path = os.path.join(temp_dir, f)
-                        break
-            
-            with open(audio_path, 'rb') as f:
-                audio_data = f.read()
-            
-            # Upload to object storage
-            storage_path = f"{APP_NAME}/uploads/{file_id}.mp3"
-            result = put_object(storage_path, audio_data, "audio/mpeg")
-            
-            # Save to database
-            media_upload = MediaUpload(
-                id=file_id,
-                storage_path=result["path"],
-                original_filename=f"{video_title[:50]}.mp3",
-                content_type="audio/mpeg",
-                size=result["size"],
-                media_type="audio"
-            )
-            
-            doc = media_upload.model_dump()
-            await db.media_uploads.insert_one(doc)
-            
-            logger.info(f"Successfully extracted audio from YouTube: {video_title}")
-            return media_upload
-            
-    except Exception as e:
-        logger.error(f"YouTube audio extraction failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to extract audio from YouTube: {str(e)}")
-
-
-def get_sora_duration(requested_duration: int) -> int:
-    """Convert requested duration to valid Sora duration (4, 8, or 12)"""
-    if requested_duration <= 4:
-        return 4
-    elif requested_duration <= 8:
-        return 8
-    else:
-        return 12
-
-def create_user_friendly_error(error_str: str) -> str:
-    """Convert technical errors to user-friendly messages"""
-    error_lower = error_str.lower()
-    
-    if "insufficient_balance" in error_lower or "insufficient balance" in error_lower:
-        return "⚠️ Insufficient balance in Universal Key. Go to Profile → Universal Key → Add Balance to continue generating videos."
-    
-    if "budget_exceeded" in error_lower or "budget has been exceeded" in error_lower:
-        return "⚠️ Budget limit reached! Add more balance to your Universal Key in Profile → Universal Key → Add Balance."
-    
-    if "400" in error_str and "bad request" in error_lower:
-        return f"⚠️ API Error: {error_str}. This might be a balance issue - check your Universal Key balance."
-    
-    return error_str
-
-async def update_video_status(video_id: str, status: str, **kwargs):
-    """Update video generation status in database"""
-    update_data = {"status": status, **kwargs}
-    await db.video_generations.update_one(
-        {"id": video_id},
-        {"$set": update_data}
-    )
-
-async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids: List[str]) -> bytes:
-    """Generate video using Sora 2 with optional image input"""
-    sora_duration = get_sora_duration(duration)
-    api_key = os.environ['EMERGENT_LLM_KEY']
-    url = "https://integrations.emergentagent.com/llm/openai/v1/videos"
-    
-    # Build form data
-    data = {
-        "model": "sora-2",
-        "prompt": prompt,
-        "size": "1280x720",
-        "seconds": str(sora_duration)
-    }
-    
-    files = {}
-    
-    # If subject images are provided, add as input_reference file upload
-    if subject_media_ids and len(subject_media_ids) > 0:
-        try:
-            # Get the first uploaded image
-            media_record = await db.media_uploads.find_one(
-                {"id": subject_media_ids[0], "is_deleted": False}, 
-                {"_id": 0}
-            )
-            if media_record and media_record.get("media_type") == "image":
-                image_data, _ = get_object(media_record["storage_path"])
-                mime_type = media_record.get("content_type", "image/jpeg")
-                filename = media_record.get("original_filename", "image.jpg")
-                
-                # Add as file upload in multipart form
-                files["input_reference"] = (filename, image_data, mime_type)
-                
-                logger.info(f"Using uploaded image as input: {filename}")
-        except Exception as e:
-            logger.warning(f"Failed to load image for input: {e}")
-    
-    try:
-        # Initiate video generation with multipart form-data
-        headers = {
-            "Authorization": f"Bearer {api_key}"
+    fid = str(uuid.uuid4())
+    with tempfile.TemporaryDirectory() as td:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': f'{td}/audio.%(ext)s',
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+            'quiet': True, 'no_warnings': True,
+            'age_limit': None,   # allow explicit content
         }
-        
-        logger.info(f"Starting video generation with prompt: {prompt[:50]}...")
-        response = requests.post(url, headers=headers, data=data, files=files if files else None, timeout=30)
-        
-        if response.status_code != 200:
-            logger.error(f"Video generation failed with status {response.status_code}")
-            logger.error(f"Response: {response.text}")
-        
-        response.raise_for_status()
-        
-        result = response.json()
-        video_id = result.get('id')
-        
-        if not video_id:
-            logger.error(f"No video ID in response: {result}")
-            return None
-        
-        logger.info(f"Video generation initiated with ID: {video_id}")
-        
-        # Poll for completion
-        max_wait = 900
-        poll_interval = 10
-        elapsed = 0
-        
-        while elapsed < max_wait:
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-            
-            status_response = requests.get(
-                f"{url}/{video_id}",
-                headers=headers,
-                timeout=30
-            )
-            status_response.raise_for_status()
-            status_data = status_response.json()
-            
-            status = status_data.get('status')
-            logger.info(f"Video generation status: {status} ({elapsed}s elapsed)")
-            
-            if status == 'completed':
-                # Download video
-                video_url = f"{url}/{video_id}/content"
-                video_response = requests.get(video_url, headers=headers, timeout=120)
-                video_response.raise_for_status()
-                logger.info(f"Video downloaded successfully: {len(video_response.content)} bytes")
-                return video_response.content
-            elif status == 'failed':
-                error = status_data.get('error', 'Unknown error')
-                raise Exception(f"Video generation failed: {error}")
-        
-        raise Exception("Video generation timeout")
-        
-    except Exception as e:
-        logger.error(f"Error in video generation: {e}")
-        raise
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(request.youtube_url, download=True)
+            title = info.get('title', 'audio')
 
-async def save_generated_video(video_id: str, video_bytes: bytes) -> str:
-    """Save generated video to storage and return path"""
-    video_path = f"{APP_NAME}/videos/{video_id}.mp4"
-    result = put_object(video_path, video_bytes, "video/mp4")
-    return result["path"]
+        # find the mp3
+        ap = None
+        for fn in os.listdir(td):
+            if fn.endswith('.mp3'):
+                ap = os.path.join(td, fn)
+                break
+        if not ap:
+            raise HTTPException(500, "Could not extract audio from YouTube")
 
-async def combine_video_with_audio(video_bytes: bytes, audio_file_id: Optional[str]) -> bytes:
-    """Combine generated video with user's audio using FFmpeg"""
-    if not audio_file_id:
-        return video_bytes
-    
-    try:
-        # Get audio file from storage
-        audio_record = await db.media_uploads.find_one({"id": audio_file_id, "is_deleted": False}, {"_id": 0})
-        if not audio_record:
-            logger.warning(f"Audio file {audio_file_id} not found, returning video without audio")
-            return video_bytes
-        
-        audio_data, _ = get_object(audio_record["storage_path"])
-        
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Save video and audio to temp files
-            video_path = f"{temp_dir}/video.mp4"
-            audio_path = f"{temp_dir}/audio.mp3"
-            output_path = f"{temp_dir}/output.mp4"
-            
-            with open(video_path, 'wb') as f:
-                f.write(video_bytes)
-            with open(audio_path, 'wb') as f:
-                f.write(audio_data)
-            
-            # Use FFmpeg to combine video with audio
-            import subprocess
-            cmd = [
-                'ffmpeg',
-                '-i', video_path,
-                '-i', audio_path,
-                '-c:v', 'copy',
-                '-c:a', 'aac',
-                '-shortest',
-                '-y',
-                output_path
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, timeout=60)
-            
-            if result.returncode == 0 and os.path.exists(output_path):
-                with open(output_path, 'rb') as f:
-                    return f.read()
-            else:
-                logger.error(f"FFmpeg failed: {result.stderr.decode()}")
-                return video_bytes
-                
-    except Exception as e:
-        logger.error(f"Failed to combine video with audio: {e}")
-        return video_bytes
+        with open(ap, 'rb') as f:
+            audio_data = f.read()
 
-async def generate_video_background(video_id: str, prompt: str, duration: int, audio_file_id: Optional[str] = None, subject_media_ids: Optional[List[str]] = None):
-    try:
-        await update_video_status(video_id, "generating")
-        
-        video_bytes = await generate_video_with_sora(prompt, duration, subject_media_ids or [])
-        
-        if video_bytes:
-            # Combine with user's audio if provided
-            if audio_file_id:
-                video_bytes = await combine_video_with_audio(video_bytes, audio_file_id)
-            
-            video_path = await save_generated_video(video_id, video_bytes)
-            
-            await update_video_status(
-                video_id, 
-                "completed",
-                video_path=video_path,
-                completed_at=datetime.now(timezone.utc).isoformat()
-            )
-            logger.info(f"Video {video_id} generated successfully")
-        else:
-            error_msg = "Video generation returned no data"
-            await update_video_status(video_id, "failed", error_message=error_msg)
-            logger.error(f"Video {video_id} failed: {error_msg}")
-            
-    except Exception as e:
-        error_str = str(e)
-        logger.error(f"Video generation failed for {video_id}: {error_str}")
-        
-        user_friendly_error = create_user_friendly_error(error_str)
-        await update_video_status(video_id, "failed", error_message=user_friendly_error)
+    result = put_object(f"{APP_NAME}/uploads/{fid}.mp3", audio_data, "audio/mpeg")
+    mu = MediaUpload(id=fid, storage_path=result["path"], original_filename=f"{title[:50]}.mp3",
+                     content_type="audio/mpeg", size=result["size"], media_type="audio")
+    await db.media_uploads.insert_one(mu.model_dump())
+    logger.info(f"YouTube audio extracted: {title}")
+    return mu
 
 @api_router.post("/generate-video", response_model=VideoGeneration)
 async def generate_video(request: GenerateVideoRequest):
-    try:
-        video_gen = VideoGeneration(
-            subject_media_ids=request.subject_media_ids,
-            audio_file_id=request.audio_file_id,
-            prompt=request.prompt,
-            duration=request.duration,
-            status="pending"
-        )
-        
-        doc = video_gen.model_dump()
-        await db.video_generations.insert_one(doc)
-        
-        asyncio.create_task(generate_video_background(
-            video_gen.id, 
-            request.prompt, 
-            request.duration,
-            request.audio_file_id,
-            request.subject_media_ids
-        ))
-        
-        return video_gen
-    except Exception as e:
-        logger.error(f"Generate video request failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    vg = VideoGeneration(subject_media_ids=request.subject_media_ids, audio_file_id=request.audio_file_id,
+                         prompt=request.prompt, duration=request.duration, status="pending")
+    await db.video_generations.insert_one(vg.model_dump())
+    asyncio.create_task(generate_video_background(vg.id, request.prompt, request.duration, request.audio_file_id, request.subject_media_ids))
+    return vg
 
 @api_router.get("/videos", response_model=List[VideoGeneration])
 async def get_videos():
-    videos = await db.video_generations.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    return videos
+    return await db.video_generations.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
 
 @api_router.get("/videos/{video_id}", response_model=VideoGeneration)
 async def get_video(video_id: str):
-    video = await db.video_generations.find_one({"id": video_id}, {"_id": 0})
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    return video
+    v = await db.video_generations.find_one({"id": video_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(404, "Video not found")
+    return v
 
 @api_router.get("/video-file/{video_id}")
 async def get_video_file(video_id: str):
-    try:
-        record = await db.video_generations.find_one({"id": video_id}, {"_id": 0})
-        if not record or not record.get("video_path"):
-            raise HTTPException(status_code=404, detail="Video file not found")
-        
-        data, content_type = get_object(record["video_path"])
-        return Response(content=data, media_type="video/mp4")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Video file retrieval failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    rec = await db.video_generations.find_one({"id": video_id}, {"_id": 0})
+    if not rec or not rec.get("video_path"):
+        raise HTTPException(404, "Video file not found")
+    data, _ = get_object(rec["video_path"])
+    return Response(content=data, media_type="video/mp4")
 
-# Include router
+# ─── App config ────────────────────────────────────────────────────────
+
 app.include_router(api_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_credentials=True,
+                   allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+                   allow_methods=["*"], allow_headers=["*"])
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
