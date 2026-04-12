@@ -25,15 +25,24 @@ function WelcomePage({ onEnter }) {
   const handleUploadWelcome = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    
+    // Check file size (max 50MB)
+    if (file.size > 50 * 1024 * 1024) {
+      alert("Video too large! Please use a video under 50MB.");
+      return;
+    }
+    
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      await axios.post(`${API}/welcome-video`, fd);
+      await axios.post(`${API}/welcome-video`, fd, { timeout: 120000 });
       setHasVideo(true);
       setVideoSrc(`${API}/welcome-video?t=${Date.now()}`);
+      alert("Rocco's video uploaded!");
     } catch (err) {
-      alert("Upload failed");
+      console.error(err);
+      alert("Upload failed. Try a smaller video or check your connection.");
     } finally { setUploading(false); }
   };
 

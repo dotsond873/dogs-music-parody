@@ -31,6 +31,9 @@ APP_NAME = "dancing-video-generator"
 storage_key = None
 
 app = FastAPI()
+# Allow large file uploads (up to 100MB)
+from starlette.requests import Request
+app.state.max_request_size = 100 * 1024 * 1024
 api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
