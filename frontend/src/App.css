@@ -1,39 +1,42 @@
 .upload-zone {
-  border: 4px dashed #0A0A0A;
-  background-color: #E0F2FE;
+  border: 3px dashed #FFD700;
+  background-color: rgba(255, 215, 0, 0.05);
   cursor: pointer;
-  transition: background-color 150ms ease-out;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out;
 }
-
 .upload-zone:hover {
-  background-color: #87CEEB;
+  background-color: rgba(255, 215, 0, 0.12);
+  border-color: #FFF;
 }
 
 .neo-button {
-  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
+  transition: transform 100ms ease-out, box-shadow 100ms ease-out;
 }
-
 .neo-button:hover:not(:disabled) {
   transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0px 0px #0A0A0A;
+  box-shadow: 2px 2px 0px 0px #FFD700;
 }
 
 .neo-card {
-  background: white;
-  border: 2px solid #0A0A0A;
-  box-shadow: 6px 6px 0px 0px #0A0A0A;
+  background: #1A1A1A;
+  border: 2px solid #333;
+  box-shadow: 4px 4px 0px 0px #FFD700;
 }
 
 .media-preview {
-  width: 120px;
-  height: 120px;
+  width: 100px;
+  height: 100px;
   object-fit: cover;
-  border: 2px solid #0A0A0A;
+  border: 2px solid #FFD700;
 }
 
 .video-player {
   width: 100%;
   max-width: 800px;
-  border: 3px solid #0A0A0A;
-  box-shadow: 8px 8px 0px 0px #0A0A0A;
+  border: 3px solid #FFD700;
+  box-shadow: 6px 6px 0px 0px #333;
 }
+
+.gold-border { border-color: #FFD700; }
+.gold-text { color: #FFD700; }
+.gold-bg { background-color: #FFD700; color: #0A0A0A; }

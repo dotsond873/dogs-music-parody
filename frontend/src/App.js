@@ -3,8 +3,82 @@ import "@/App.css";
 import axios from "axios";
 
 const getApi = () => `${process.env.REACT_APP_BACKEND_URL || window.location.origin}/api`;
+const LOGO_URL = "https://static.prod-images.emergentagent.com/jobs/bf18e4f8-ad8a-42ac-b968-f90b5b8885dc/images/be8dc0b67c3d95ff0e556add8427e5501c84ec7f32d450d82f7231bdedeabc0b.png";
 
-function App() {
+// ═══════════════════════════════════════════════════════════════════
+// WELCOME PAGE
+// ═══════════════════════════════════════════════════════════════════
+function WelcomePage({ onEnter }) {
+  const API = getApi();
+  const [hasVideo, setHasVideo] = useState(false);
+  const [videoSrc, setVideoSrc] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    // Check if welcome video exists
+    axios.head(`${API}/welcome-video`).then(() => {
+      setHasVideo(true);
+      setVideoSrc(`${API}/welcome-video?t=${Date.now()}`);
+    }).catch(() => setHasVideo(false));
+  }, [API]);
+
+  const handleUploadWelcome = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      await axios.post(`${API}/welcome-video`, fd);
+      setHasVideo(true);
+      setVideoSrc(`${API}/welcome-video?t=${Date.now()}`);
+    } catch (err) {
+      alert("Upload failed");
+    } finally { setUploading(false); }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ backgroundColor: "#0A0A0A" }}
+         data-testid="welcome-page">
+
+      {/* Logo */}
+      <img src={LOGO_URL} alt="NAUGHTY DAWGZ" className="w-full max-w-2xl mb-6" data-testid="welcome-logo" />
+
+      {/* Video */}
+      {hasVideo ? (
+        <div className="w-full max-w-lg mb-8">
+          <video autoPlay loop muted playsInline className="w-full border-2 border-yellow-500 shadow-lg"
+                 style={{ boxShadow: "0 0 30px rgba(255,215,0,0.3)" }}
+                 src={videoSrc} data-testid="welcome-video" />
+        </div>
+      ) : (
+        <div className="w-full max-w-lg mb-8">
+          <label className="block p-8 text-center border-2 border-dashed border-yellow-500 cursor-pointer hover:bg-yellow-500/10 transition-colors"
+                 data-testid="welcome-video-upload">
+            <input type="file" accept="video/*" onChange={handleUploadWelcome} className="hidden" disabled={uploading} />
+            <p className="text-yellow-500 font-bold uppercase text-sm">
+              {uploading ? "UPLOADING ROCCO'S VIDEO..." : "TAP TO UPLOAD ROCCO'S VIDEO"}
+            </p>
+            <p className="text-gray-500 text-xs mt-1">Upload a video of Rocco the French Bulldog</p>
+          </label>
+        </div>
+      )}
+
+      {/* Enter Button */}
+      <button onClick={onEnter}
+              className="neo-button px-12 py-4 text-xl font-black uppercase tracking-widest border-2 pulse-glow"
+              style={{ backgroundColor: "#FFD700", color: "#0A0A0A", borderColor: "#FFD700" }}
+              data-testid="enter-button">
+        ENTER
+      </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════════════
+function MainApp() {
   const [subjectFiles, setSubjectFiles] = useState([]);
   const [audioFile, setAudioFile] = useState(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
@@ -21,74 +95,50 @@ function App() {
   const API = getApi();
 
   const loadVideos = useCallback(async () => {
-    try {
-      const r = await axios.get(`${API}/videos`);
-      setVideos(r.data);
-    } catch (e) { console.error(e); }
+    try { const r = await axios.get(`${API}/videos`); setVideos(r.data); } catch (e) { console.error(e); }
   }, [API]);
 
   useEffect(() => { loadVideos(); }, [loadVideos]);
 
-  // ─── Upload subject image ───────────────────────────────────────
   const handleSubjectUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    setUploading(true);
-    setStatusMsg("Uploading image...");
+    setUploading(true); setStatusMsg("Uploading...");
     try {
       const uploaded = [];
       for (const file of files) {
-        const fd = new FormData();
-        fd.append("file", file);
+        const fd = new FormData(); fd.append("file", file);
         const mt = file.type.startsWith("video/") ? "video" : "image";
         const r = await axios.post(`${API}/upload-media?media_type=${mt}`, fd);
         uploaded.push(r.data);
       }
-      setSubjectFiles(prev => [...prev, ...uploaded]);
-      setStatusMsg("");
-    } catch (e) {
-      console.error(e);
-      alert("Upload failed. Try again.");
-    } finally { setUploading(false); }
+      setSubjectFiles(prev => [...prev, ...uploaded]); setStatusMsg("");
+    } catch (e) { alert("Upload failed."); } finally { setUploading(false); }
   };
 
-  // ─── Upload audio file ─────────────────────────────────────────
   const handleAudioUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setUploading(true);
-    setStatusMsg("Uploading audio...");
+    setUploading(true); setStatusMsg("Uploading audio...");
     try {
-      const fd = new FormData();
-      fd.append("file", file);
+      const fd = new FormData(); fd.append("file", file);
       const r = await axios.post(`${API}/upload-media?media_type=audio`, fd);
-      setAudioFile(r.data);
-      setStatusMsg("");
-    } catch (e) {
-      console.error(e);
-      alert("Audio upload failed.");
-    } finally { setUploading(false); }
+      setAudioFile(r.data); setStatusMsg("");
+    } catch (e) { alert("Audio upload failed."); } finally { setUploading(false); }
   };
 
-  // ─── YouTube extract ───────────────────────────────────────────
   const handleYouTube = async () => {
     if (!youtubeUrl.trim()) return;
-    setExtracting(true);
-    setStatusMsg("Extracting audio from YouTube (may take 30s)...");
+    setExtracting(true); setStatusMsg("Extracting from YouTube...");
     try {
       const r = await axios.post(`${API}/youtube-audio`, { youtube_url: youtubeUrl.trim() });
-      setAudioFile(r.data);
-      setYoutubeUrl("");
-      setStatusMsg("");
+      setAudioFile(r.data); setYoutubeUrl(""); setStatusMsg("");
       alert(`Song loaded: ${r.data.original_filename}`);
     } catch (e) {
-      console.error(e);
-      alert("YouTube extraction failed. Check the URL and try again.");
-      setStatusMsg("");
+      alert("YouTube extraction failed. Check the URL."); setStatusMsg("");
     } finally { setExtracting(false); }
   };
 
-  // ─── Build prompt & generate ───────────────────────────────────
   const buildPrompt = () => {
     let p = subject.trim() || "The subject";
     if (clothing.trim()) p += `. Wearing ${clothing.trim()}`;
@@ -99,25 +149,15 @@ function App() {
   const handleGenerate = async () => {
     if (subjectFiles.length === 0) { alert("Upload at least one subject image"); return; }
     if (!subject.trim() && !actions.trim()) { alert("Describe who they are or what they should do"); return; }
-
-    const prompt = buildPrompt();
-    setGenerating(true);
-    setCurrentVideo(null);
-
+    setGenerating(true); setCurrentVideo(null);
     try {
       const r = await axios.post(`${API}/generate-video`, {
         subject_media_ids: subjectFiles.map(f => f.id),
         audio_file_id: audioFile?.id || null,
-        prompt,
-        duration: 30
+        prompt: buildPrompt(), duration: 30
       });
-      setCurrentVideo(r.data);
-      pollStatus(r.data.id);
-    } catch (e) {
-      console.error(e);
-      alert(e.response?.data?.detail || "Generation failed");
-      setGenerating(false);
-    }
+      setCurrentVideo(r.data); pollStatus(r.data.id);
+    } catch (e) { alert(e.response?.data?.detail || "Generation failed"); setGenerating(false); }
   };
 
   const pollStatus = (id) => {
@@ -125,11 +165,7 @@ function App() {
       try {
         const r = await axios.get(`${API}/videos/${id}`);
         setCurrentVideo(r.data);
-        if (r.data.status === "completed" || r.data.status === "failed") {
-          clearInterval(iv);
-          setGenerating(false);
-          loadVideos();
-        }
+        if (r.data.status === "completed" || r.data.status === "failed") { clearInterval(iv); setGenerating(false); loadVideos(); }
       } catch (e) { clearInterval(iv); setGenerating(false); }
     }, 5000);
   };
@@ -137,39 +173,30 @@ function App() {
   const removeFile = (id) => setSubjectFiles(prev => prev.filter(f => f.id !== id));
   const canGenerate = !generating && !uploading && !extracting && subjectFiles.length > 0 && (subject.trim() || actions.trim());
 
-  // ─── Render ────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#FFF4D2" }}>
-
+    <div className="min-h-screen" style={{ backgroundColor: "#0A0A0A" }}>
       {/* Header */}
-      <div className="p-6 md:p-12 text-center">
-        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight uppercase mb-3"
-            style={{ fontFamily: "'Bricolage Grotesque', sans-serif", color: "#0A0A0A" }}
-            data-testid="app-title">
-          Dancing Dave's Swamp Donkeys & Spundunnits
-        </h1>
-        <p className="text-base md:text-lg max-w-2xl mx-auto" style={{ color: "#404040" }}>
+      <div className="p-4 md:p-8 text-center">
+        <img src={LOGO_URL} alt="NAUGHTY DAWGZ" className="mx-auto w-full max-w-md mb-2" data-testid="app-logo" />
+        <p className="text-sm md:text-base max-w-xl mx-auto" style={{ color: "#999" }}>
           Upload anything. Add music. Describe the drip. Watch AI make it dance.
         </p>
       </div>
 
-      <div className="px-4 md:px-12 pb-16 max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="px-4 md:px-8 pb-16 max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-          {/* ── LEFT: Inputs ────────────────────────────────── */}
-          <div className="space-y-5">
+          {/* LEFT COLUMN */}
+          <div className="space-y-4">
 
-            {/* 1) Subject image */}
-            <div className="neo-card p-5 md:p-6" data-testid="subject-upload-section">
-              <h3 className="text-xl md:text-2xl font-bold tracking-tight mb-3"
-                  style={{ fontFamily: "'Bricolage Grotesque', sans-serif" }}>
-                1. DROP YOUR SUBJECT
-              </h3>
-              <label className="upload-zone block p-8 text-center shadow-[6px_6px_0px_0px_#0A0A0A] cursor-pointer">
+            {/* Subject Upload */}
+            <div className="neo-card p-4 md:p-5" data-testid="subject-upload-section">
+              <h3 className="text-lg md:text-xl font-bold tracking-tight mb-2 gold-text">1. DROP YOUR SUBJECT</h3>
+              <label className="upload-zone block p-6 text-center cursor-pointer">
                 <input type="file" multiple accept="image/*,video/*" onChange={handleSubjectUpload}
                        className="hidden" disabled={uploading} data-testid="subject-file-input" />
-                <div className="text-base font-bold uppercase">{uploading ? "UPLOADING..." : "TAP TO UPLOAD"}</div>
-                <div className="text-xs mt-1" style={{ color: "#404040" }}>Dogs, humans, aliens, washing machines — whatever</div>
+                <div className="text-sm font-bold uppercase gold-text">{uploading ? "UPLOADING..." : "TAP TO UPLOAD"}</div>
+                <div className="text-xs mt-1" style={{ color: "#888" }}>Dogs, humans, aliens, washing machines</div>
               </label>
               {subjectFiles.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2" data-testid="uploaded-subjects">
@@ -177,7 +204,7 @@ function App() {
                     <div key={f.id} className="relative">
                       <img src={`${API}/files/${f.id}`} alt="" className="media-preview" />
                       <button onClick={() => removeFile(f.id)}
-                              className="absolute -top-2 -right-2 bg-red-500 text-white w-5 h-5 flex items-center justify-center border-2 border-black text-xs font-bold"
+                              className="absolute -top-1 -right-1 bg-red-600 text-white w-5 h-5 flex items-center justify-center border border-red-800 text-xs font-bold rounded-full"
                               data-testid={`remove-subject-${f.id}`}>x</button>
                     </div>
                   ))}
@@ -185,158 +212,131 @@ function App() {
               )}
             </div>
 
-            {/* 2) Music */}
-            <div className="neo-card p-5 md:p-6" data-testid="audio-upload-section">
-              <h3 className="text-xl md:text-2xl font-bold tracking-tight mb-3"
-                  style={{ fontFamily: "'Bricolage Grotesque', sans-serif" }}>
-                2. PICK YOUR MUSIC
-              </h3>
-
-              {/* YouTube */}
+            {/* Music */}
+            <div className="neo-card p-4 md:p-5" data-testid="audio-upload-section">
+              <h3 className="text-lg md:text-xl font-bold tracking-tight mb-2 gold-text">2. PICK YOUR MUSIC</h3>
               <div className="flex gap-2 mb-3">
                 <input type="text" value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)}
                        placeholder="Paste YouTube URL..."
-                       className="flex-1 px-3 py-2 text-sm border-2 border-black focus:outline-none"
-                       style={{ backgroundColor: "white" }}
+                       className="flex-1 px-3 py-2 text-xs border-2 border-gray-600 focus:border-yellow-500 focus:outline-none bg-black text-white"
                        disabled={extracting} data-testid="youtube-url-input" />
                 <button onClick={handleYouTube} disabled={extracting || !youtubeUrl.trim()}
-                        className="neo-button px-4 py-2 text-xs font-bold uppercase border-2 border-black"
-                        style={{ backgroundColor: extracting ? "#E5E5E5" : "#87CEEB", boxShadow: "3px 3px 0 #0A0A0A" }}
+                        className="neo-button px-4 py-2 text-xs font-bold uppercase border-2"
+                        style={{ backgroundColor: extracting ? "#333" : "#FFD700", color: "#0A0A0A", borderColor: "#FFD700" }}
                         data-testid="youtube-extract-btn">
                   {extracting ? "..." : "GET"}
                 </button>
               </div>
-
-              <div className="text-center text-xs font-bold mb-3">OR UPLOAD FILE</div>
-
-              <label className="upload-zone block p-6 text-center shadow-[4px_4px_0px_0px_#0A0A0A] cursor-pointer">
-                <input type="file" accept="audio/*" onChange={handleAudioUpload}
-                       className="hidden" disabled={uploading} data-testid="audio-file-input" />
-                <div className="text-sm font-bold uppercase">{audioFile ? `${audioFile.original_filename}` : "TAP TO UPLOAD AUDIO"}</div>
+              <div className="text-center text-xs font-bold mb-2" style={{ color: "#666" }}>OR</div>
+              <label className="upload-zone block p-4 text-center cursor-pointer">
+                <input type="file" accept="audio/*" onChange={handleAudioUpload} className="hidden" disabled={uploading}
+                       data-testid="audio-file-input" />
+                <div className="text-xs font-bold uppercase gold-text">{audioFile ? audioFile.original_filename : "TAP TO UPLOAD AUDIO"}</div>
               </label>
-
               {audioFile && (
-                <div className="mt-2 p-2 border-2 border-black text-xs font-bold" style={{ backgroundColor: "#98FB98" }}
+                <div className="mt-2 p-2 border border-green-700 text-xs font-bold" style={{ backgroundColor: "rgba(0,128,0,0.15)", color: "#4ADE80" }}
                      data-testid="audio-loaded">
                   LOADED: {audioFile.original_filename}
                 </div>
               )}
             </div>
 
-            {/* 3) Prompt builder */}
-            <div className="neo-card p-5 md:p-6" data-testid="prompt-section">
-              <h3 className="text-xl md:text-2xl font-bold tracking-tight mb-3"
-                  style={{ fontFamily: "'Bricolage Grotesque', sans-serif" }}>
-                3. DESCRIBE THE VIBE
-              </h3>
+            {/* Prompt Builder */}
+            <div className="neo-card p-4 md:p-5" data-testid="prompt-section">
+              <h3 className="text-lg md:text-xl font-bold tracking-tight mb-2 gold-text">3. DESCRIBE THE VIBE</h3>
 
-              <label className="block text-xs font-bold uppercase mb-1">Who / What is this?</label>
+              <label className="block text-xs font-bold uppercase mb-1 gold-text">Who / What?</label>
               <input type="text" value={subject} onChange={e => setSubject(e.target.value)}
                      placeholder="Three pit bulls, a washing machine, two aliens..."
-                     className="w-full px-3 py-2 text-sm border-2 border-black mb-3 focus:outline-none focus:shadow-[3px_3px_0_#FFB6C1]"
-                     style={{ backgroundColor: "white" }} disabled={generating}
-                     data-testid="subject-input" />
+                     className="w-full px-3 py-2 text-sm border-2 border-gray-600 focus:border-yellow-500 focus:outline-none mb-3 bg-black text-white"
+                     disabled={generating} data-testid="subject-input" />
 
-              <label className="block text-xs font-bold uppercase mb-1">Clothing / Jewelry / Grills</label>
+              <label className="block text-xs font-bold uppercase mb-1 gold-text">Clothing / Jewelry / Grills</label>
               <input type="text" value={clothing} onChange={e => setClothing(e.target.value)}
-                     placeholder="Baggy jeans, Alabama jerseys, iced out chains, platinum diamond grills..."
-                     className="w-full px-3 py-2 text-sm border-2 border-black mb-3 focus:outline-none focus:shadow-[3px_3px_0_#FFB6C1]"
-                     style={{ backgroundColor: "white" }} disabled={generating}
-                     data-testid="clothing-input" />
+                     placeholder="Baggy jeans, Alabama jerseys, iced out chains, platinum grills..."
+                     className="w-full px-3 py-2 text-sm border-2 border-gray-600 focus:border-yellow-500 focus:outline-none mb-3 bg-black text-white"
+                     disabled={generating} data-testid="clothing-input" />
 
-              <label className="block text-xs font-bold uppercase mb-1">Dance Style / Actions</label>
+              <label className="block text-xs font-bold uppercase mb-1 gold-text">Dance Style / Actions</label>
               <textarea value={actions} onChange={e => setActions(e.target.value)}
-                        placeholder="Dancing grunge style with a beer in one hand and a blunt in the other, head bobbing, slow grinding..."
-                        className="w-full px-3 py-2 text-sm border-2 border-black focus:outline-none focus:shadow-[3px_3px_0_#FFB6C1]"
-                        style={{ backgroundColor: "white", minHeight: "80px" }} disabled={generating}
-                        data-testid="actions-input" />
+                        placeholder="Grunge dancing with beer in one hand and blunt in the other..."
+                        className="w-full px-3 py-2 text-sm border-2 border-gray-600 focus:border-yellow-500 focus:outline-none bg-black text-white"
+                        style={{ minHeight: "70px" }} disabled={generating} data-testid="actions-input" />
             </div>
 
-            {/* Generate button */}
+            {/* Generate */}
             <button onClick={handleGenerate} disabled={!canGenerate}
-                    className="neo-button w-full px-6 py-4 text-lg font-bold uppercase tracking-wide border-2 border-black"
-                    style={{
-                      backgroundColor: canGenerate ? "#FFB6C1" : "#E5E5E5",
-                      color: "#0A0A0A",
-                      boxShadow: "4px 4px 0 #0A0A0A",
-                      cursor: canGenerate ? "pointer" : "not-allowed"
-                    }}
+                    className="neo-button w-full px-6 py-4 text-lg font-black uppercase tracking-wide border-2"
+                    style={{ backgroundColor: canGenerate ? "#FFD700" : "#333", color: "#0A0A0A",
+                             borderColor: "#FFD700", boxShadow: "4px 4px 0 #333",
+                             cursor: canGenerate ? "pointer" : "not-allowed" }}
                     data-testid="generate-button">
               {generating ? "GENERATING... (2-5 MIN)" : "GENERATE VIDEO"}
             </button>
-
-            {statusMsg && <p className="text-center text-sm font-bold" data-testid="status-msg">{statusMsg}</p>}
+            {statusMsg && <p className="text-center text-xs font-bold gold-text" data-testid="status-msg">{statusMsg}</p>}
           </div>
 
-          {/* ── RIGHT: Preview ──────────────────────────────── */}
+          {/* RIGHT COLUMN */}
           <div>
-            <div className="neo-card p-5 md:p-6" data-testid="video-preview-section">
-              <h3 className="text-xl md:text-2xl font-bold tracking-tight mb-3"
-                  style={{ fontFamily: "'Bricolage Grotesque', sans-serif" }}>
-                VIDEO PREVIEW
-              </h3>
+            <div className="neo-card p-4 md:p-5" data-testid="video-preview-section">
+              <h3 className="text-lg md:text-xl font-bold tracking-tight mb-3 gold-text">VIDEO PREVIEW</h3>
 
               {!currentVideo && (
-                <div className="p-10 border-4 border-dashed border-black text-center" style={{ backgroundColor: "#E0F2FE" }}
-                     data-testid="empty-preview">
-                  <p className="text-base font-bold uppercase">YOUR VIDEO WILL APPEAR HERE</p>
+                <div className="p-8 border-2 border-dashed border-gray-600 text-center" data-testid="empty-preview">
+                  <p className="text-sm font-bold uppercase" style={{ color: "#666" }}>YOUR VIDEO WILL APPEAR HERE</p>
                 </div>
               )}
 
               {currentVideo && currentVideo.status === "generating" && (
-                <div className="p-10 border-2 border-black text-center" style={{ backgroundColor: "#FFD700" }}
+                <div className="p-8 border-2 border-yellow-500 text-center" style={{ backgroundColor: "rgba(255,215,0,0.08)" }}
                      data-testid="generating-status">
                   <div className="overflow-hidden">
-                    <div className="marquee text-lg font-bold uppercase">
+                    <div className="marquee text-base font-bold uppercase gold-text">
                       GENERATING... CHOREOGRAPHING... STYLING...
                     </div>
                   </div>
-                  <p className="mt-3 text-sm font-semibold">Takes 2-5 minutes. Don't close this page.</p>
+                  <p className="mt-3 text-xs" style={{ color: "#999" }}>2-5 minutes. Don't close the page.</p>
                 </div>
               )}
 
               {currentVideo && currentVideo.status === "pending" && (
-                <div className="p-10 border-2 border-black text-center" style={{ backgroundColor: "#FFD700" }}
-                     data-testid="pending-status">
-                  <p className="text-lg font-bold uppercase">QUEUED...</p>
-                  <p className="mt-2 text-sm">Starting soon.</p>
+                <div className="p-8 border-2 border-yellow-500 text-center" data-testid="pending-status">
+                  <p className="text-base font-bold uppercase gold-text">QUEUED...</p>
                 </div>
               )}
 
               {currentVideo && currentVideo.status === "completed" && (
                 <div data-testid="completed-video">
-                  <video controls className="video-player" src={`${API}/video-file/${currentVideo.id}`}
-                         data-testid="video-player" />
-                  <div className="mt-3 p-3 border-2 border-black" style={{ backgroundColor: "#98FB98" }}>
-                    <p className="font-bold text-sm">VIDEO COMPLETE!</p>
-                    <p className="text-xs mt-1">{currentVideo.prompt}</p>
+                  <video controls className="video-player" src={`${API}/video-file/${currentVideo.id}`} data-testid="video-player" />
+                  <div className="mt-3 p-3 border border-green-700" style={{ backgroundColor: "rgba(0,128,0,0.15)" }}>
+                    <p className="font-bold text-sm" style={{ color: "#4ADE80" }}>VIDEO COMPLETE!</p>
+                    <p className="text-xs mt-1" style={{ color: "#999" }}>{currentVideo.prompt}</p>
                   </div>
                 </div>
               )}
 
               {currentVideo && currentVideo.status === "failed" && (
-                <div className="p-8 border-2 border-black text-center" style={{ backgroundColor: "#FFB6C1" }}
+                <div className="p-6 border-2 border-red-600 text-center" style={{ backgroundColor: "rgba(255,0,0,0.08)" }}
                      data-testid="failed-status">
-                  <p className="font-bold text-lg">GENERATION FAILED</p>
-                  <p className="text-sm mt-2">{currentVideo.error_message || "Something went wrong"}</p>
+                  <p className="font-bold text-base text-red-400">GENERATION FAILED</p>
+                  <p className="text-xs mt-2" style={{ color: "#999" }}>{currentVideo.error_message || "Something went wrong"}</p>
                 </div>
               )}
             </div>
 
             {/* History */}
             {videos.length > 0 && (
-              <div className="mt-5 neo-card p-5" data-testid="previous-videos">
-                <h4 className="text-lg font-bold mb-3" style={{ fontFamily: "'Bricolage Grotesque', sans-serif" }}>
-                  PREVIOUS GENERATIONS
-                </h4>
+              <div className="mt-4 neo-card p-4" data-testid="previous-videos">
+                <h4 className="text-base font-bold mb-3 gold-text">PREVIOUS GENERATIONS</h4>
                 <div className="space-y-2">
                   {videos.slice(0, 8).map(v => (
-                    <div key={v.id} className="p-2 border-2 border-black cursor-pointer hover:bg-gray-50"
+                    <div key={v.id} className="p-2 border border-gray-700 cursor-pointer hover:border-yellow-500 transition-colors"
                          onClick={() => setCurrentVideo(v)} data-testid={`video-history-${v.id}`}>
                       <div className="flex justify-between items-start">
-                        <p className="text-xs font-semibold flex-1">{v.prompt.substring(0, 50)}...</p>
-                        <span className="px-2 py-0.5 text-xs font-bold border border-black ml-2"
-                              style={{ backgroundColor: v.status === "completed" ? "#98FB98" : v.status === "failed" ? "#FFB6C1" : "#FFD700" }}>
+                        <p className="text-xs flex-1" style={{ color: "#CCC" }}>{v.prompt.substring(0, 50)}...</p>
+                        <span className="px-2 py-0.5 text-xs font-bold ml-2"
+                              style={{ backgroundColor: v.status === "completed" ? "rgba(0,128,0,0.3)" : v.status === "failed" ? "rgba(255,0,0,0.3)" : "rgba(255,215,0,0.3)",
+                                       color: v.status === "completed" ? "#4ADE80" : v.status === "failed" ? "#F87171" : "#FFD700" }}>
                           {v.status.toUpperCase()}
                         </span>
                       </div>
@@ -350,6 +350,19 @@ function App() {
       </div>
     </div>
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// APP (Router)
+// ═══════════════════════════════════════════════════════════════════
+function App() {
+  const [entered, setEntered] = useState(false);
+
+  if (!entered) {
+    return <WelcomePage onEnter={() => setEntered(true)} />;
+  }
+
+  return <MainApp />;
 }
 
 export default App;

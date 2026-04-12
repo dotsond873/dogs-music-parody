@@ -212,6 +212,68 @@ class DancingVideoAPITester:
         print(f"   Video still processing after {max_polls} polls")
         return True  # Not a failure, just still processing
 
+    def test_upload_welcome_video(self):
+        """Test uploading welcome video"""
+        # Create a minimal MP4 file header
+        mp4_header = b'\x00\x00\x00\x20ftypmp41\x00\x00\x00\x00mp41isom\x00\x00\x00\x08free'
+        
+        files = {'file': ('rocco_welcome.mp4', mp4_header, 'video/mp4')}
+        
+        success, response = self.run_test(
+            "Upload Welcome Video",
+            "POST",
+            "welcome-video",
+            200,
+            files=files
+        )
+        
+        if success and 'id' in response:
+            print(f"   Welcome video uploaded, ID: {response['id']}")
+            return True
+        return False
+
+    def test_get_welcome_video(self):
+        """Test getting welcome video"""
+        success, response = self.run_test(
+            "Get Welcome Video",
+            "GET",
+            "welcome-video",
+            200
+        )
+        return success
+
+    def test_youtube_audio_extraction(self):
+        """Test YouTube audio extraction"""
+        # Use a short, known working YouTube URL for testing
+        data = {
+            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"  # Rick Roll - short and reliable
+        }
+        
+        success, response = self.run_test(
+            "YouTube Audio Extraction",
+            "POST",
+            "youtube-audio",
+            200,
+            data=data
+        )
+        
+        if success and 'id' in response:
+            self.uploaded_files.append(response)
+            print(f"   YouTube audio extracted, ID: {response['id']}")
+            print(f"   Filename: {response.get('original_filename', 'unknown')}")
+            return True
+        return False
+
+    def test_video_file_download(self, video_id):
+        """Test downloading video file"""
+        success, response = self.run_test(
+            f"Download Video File {video_id}",
+            "GET",
+            f"video-file/{video_id}",
+            200
+        )
+        return success
+
 def main():
     print("🎬 Starting Dancing Video Generator API Tests")
     print("=" * 50)
@@ -227,34 +289,50 @@ def main():
     if tester.test_health_check():
         tests_passed += 1
     
-    # 2. Upload subject image
+    # 2. Upload welcome video
+    total_tests += 1
+    if tester.test_upload_welcome_video():
+        tests_passed += 1
+    
+    # 3. Get welcome video
+    total_tests += 1
+    if tester.test_get_welcome_video():
+        tests_passed += 1
+    
+    # 4. Upload subject image
     total_tests += 1
     if tester.test_upload_subject_image():
         tests_passed += 1
     
-    # 3. Upload audio file
+    # 5. Upload audio file
     total_tests += 1
     if tester.test_upload_audio_file():
         tests_passed += 1
     
-    # 4. Test file retrieval
+    # 6. Test YouTube audio extraction (may fail due to network/rate limits)
+    total_tests += 1
+    print("\n⚠️  YouTube test may fail due to rate limits or network issues")
+    if tester.test_youtube_audio_extraction():
+        tests_passed += 1
+    
+    # 7. Test file retrieval
     if tester.uploaded_files:
         for uploaded_file in tester.uploaded_files:
             total_tests += 1
             if tester.test_get_uploaded_file(uploaded_file['id']):
                 tests_passed += 1
     
-    # 5. Test video generation
+    # 8. Test video generation
     total_tests += 1
     if tester.test_generate_video():
         tests_passed += 1
     
-    # 6. Test videos list
+    # 9. Test videos list
     total_tests += 1
     if tester.test_get_videos_list():
         tests_passed += 1
     
-    # 7. Test video status polling
+    # 10. Test video status polling
     if tester.generated_videos:
         for video in tester.generated_videos:
             total_tests += 1

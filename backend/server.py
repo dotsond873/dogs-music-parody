@@ -134,8 +134,9 @@ async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids
     api_key = os.environ['EMERGENT_LLM_KEY']
     url = "https://integrations.emergentagent.com/llm/openai/v1/videos"
 
-    form_data = {"model": "sora-2", "prompt": prompt, "size": "1280x720", "seconds": str(sora_dur)}
+    form_data = {"model": "sora-2", "size": "1280x720", "seconds": str(sora_dur)}
     files = None
+    has_image = False
 
     # Load + resize the first uploaded image
     if subject_media_ids:
@@ -145,9 +146,16 @@ async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids
                 raw, _ = get_object(rec["storage_path"])
                 resized = resize_image_to_1280x720(raw)
                 files = {"input_reference": ("subject.jpg", resized, "image/jpeg")}
+                has_image = True
                 logger.info(f"Prepared resized image for Sora 2")
         except Exception as exc:
             logger.warning(f"Image prep failed, falling back to text-only: {exc}")
+
+    # When using input_reference, prefix prompt to tell Sora to keep the subject
+    if has_image:
+        form_data["prompt"] = f"Animate the exact subject shown in the reference image. Keep their appearance, features, and body exactly as shown. {prompt}"
+    else:
+        form_data["prompt"] = prompt
 
     headers = {"Authorization": f"Bearer {api_key}"}
 
@@ -233,6 +241,12 @@ async def generate_video_background(vid: str, prompt: str, duration: int, audio_
 @app.on_event("startup")
 async def startup():
     try:
+        # Ensure ffmpeg is available
+        import shutil
+        if not shutil.which('ffmpeg'):
+            subprocess.run(['apt-get', 'update', '-qq'], capture_output=True)
+            subprocess.run(['apt-get', 'install', '-y', 'ffmpeg', '-qq'], capture_output=True)
+            logger.info("FFmpeg installed")
         init_storage()
         logger.info("App started, storage ready")
     except Exception as e:
@@ -240,7 +254,32 @@ async def startup():
 
 @api_router.get("/")
 async def root():
-    return {"message": "Dancing Dave's Swamp Donkeys and Spundunnits API"}
+    return {"message": "NAUGHTY DAWGZ - ANOTHER ODB PRODUCTION API"}
+
+@api_router.get("/welcome-video")
+async def get_welcome_video():
+    """Get the welcome video for the landing page"""
+    rec = await db.media_uploads.find_one({"media_type": "welcome_video", "is_deleted": False}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "No welcome video uploaded yet")
+    data, ct = get_object(rec["storage_path"])
+    return Response(content=data, media_type="video/mp4")
+
+@api_router.post("/welcome-video", response_model=MediaUpload)
+async def upload_welcome_video(file: UploadFile = File(...)):
+    """Upload the welcome video for the landing page"""
+    # Mark old welcome videos as deleted
+    await db.media_uploads.update_many({"media_type": "welcome_video"}, {"$set": {"is_deleted": True}})
+    
+    fid = str(uuid.uuid4())
+    data = await file.read()
+    ext = file.filename.split(".")[-1] if "." in file.filename else "mp4"
+    result = put_object(f"{APP_NAME}/welcome/{fid}.{ext}", data, file.content_type or "video/mp4")
+    mu = MediaUpload(id=fid, storage_path=result["path"], original_filename=file.filename,
+                     content_type=file.content_type or "video/mp4", size=result["size"], media_type="welcome_video")
+    await db.media_uploads.insert_one(mu.model_dump())
+    logger.info(f"Welcome video uploaded: {file.filename}")
+    return mu
 
 @api_router.post("/upload-media", response_model=MediaUpload)
 async def upload_media(file: UploadFile = File(...), media_type: str = Query(...)):
