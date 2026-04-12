@@ -153,7 +153,7 @@ async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids
 
     # Initiate generation
     logger.info(f"Sending to Sora 2: prompt={prompt[:60]}... dur={sora_dur} image={'yes' if files else 'no'}")
-    resp = requests.post(url, headers=headers, data=form_data, files=files, timeout=60)
+    resp = requests.post(url, headers=headers, data=form_data, files=files, timeout=120)
 
     if resp.status_code != 200:
         logger.error(f"Sora 2 init failed [{resp.status_code}]: {resp.text}")
