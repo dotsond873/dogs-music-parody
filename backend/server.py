@@ -308,15 +308,29 @@ async def extract_youtube_audio(request: YouTubeAudioRequest):
     fid = str(uuid.uuid4())
     with tempfile.TemporaryDirectory() as td:
         ydl_opts = {
-            'format': 'bestaudio/best',
+            'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'outtmpl': f'{td}/audio.%(ext)s',
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
             'quiet': True, 'no_warnings': True,
-            'age_limit': None,   # allow explicit content
+            'age_limit': None,
+            'geo_bypass': True,
+            'geo_bypass_country': 'US',
+            'extractor_args': {'youtube': {'player_client': ['web', 'mweb', 'android']}},
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9',
+            },
+            'socket_timeout': 30,
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(request.youtube_url, download=True)
-            title = info.get('title', 'audio')
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(request.youtube_url, download=True)
+                title = info.get('title', 'audio')
+        except Exception as yt_err:
+            err_str = str(yt_err)
+            if "not made this video available in your country" in err_str or "Video unavailable" in err_str or "403: Forbidden" in err_str:
+                raise HTTPException(400, "This YouTube video is restricted on our server. Try: 1) A different upload of the same song, 2) A lyric video version, 3) Upload the MP3 file directly instead.")
+            raise HTTPException(500, f"YouTube extraction failed: {err_str[:200]}")
 
         # find the mp3
         ap = None
