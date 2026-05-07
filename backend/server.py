@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -265,8 +265,18 @@ async def get_welcome_video():
     rec = await db.media_uploads.find_one({"media_type": "welcome_video", "is_deleted": False}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "No welcome video uploaded yet")
-    data, ct = get_object(rec["storage_path"])
-    return Response(content=data, media_type="video/mp4")
+    
+    data, _ = get_object(rec["storage_path"])
+    content_length = len(data)
+    
+    async def video_stream():
+        chunk_size = 1024 * 1024  # 1MB chunks
+        for i in range(0, len(data), chunk_size):
+            yield data[i:i + chunk_size]
+            await asyncio.sleep(0)  # Allow other tasks to run
+    
+    headers = {"Content-Length": str(content_length)}
+    return StreamingResponse(video_stream(), media_type="video/mp4", headers=headers)
 
 @api_router.post("/welcome-video", response_model=MediaUpload)
 async def upload_welcome_video(file: UploadFile = File(...)):
@@ -300,8 +310,18 @@ async def get_file(file_id: str):
     rec = await db.media_uploads.find_one({"id": file_id, "is_deleted": False}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "File not found")
+    
     data, ct = get_object(rec["storage_path"])
-    return Response(content=data, media_type=rec.get("content_type", ct))
+    content_length = len(data)
+    
+    async def file_stream():
+        chunk_size = 1024 * 1024  # 1MB chunks
+        for i in range(0, len(data), chunk_size):
+            yield data[i:i + chunk_size]
+            await asyncio.sleep(0)  # Allow other tasks to run
+    
+    headers = {"Content-Length": str(content_length)}
+    return StreamingResponse(file_stream(), media_type=rec.get("content_type", "application/octet-stream"), headers=headers)
 
 @api_router.post("/youtube-audio", response_model=MediaUpload)
 async def extract_youtube_audio(request: YouTubeAudioRequest):
@@ -375,8 +395,18 @@ async def get_video_file(video_id: str):
     rec = await db.video_generations.find_one({"id": video_id}, {"_id": 0})
     if not rec or not rec.get("video_path"):
         raise HTTPException(404, "Video file not found")
+    
     data, _ = get_object(rec["video_path"])
-    return Response(content=data, media_type="video/mp4")
+    content_length = len(data)
+    
+    async def video_stream():
+        chunk_size = 1024 * 1024  # 1MB chunks
+        for i in range(0, len(data), chunk_size):
+            yield data[i:i + chunk_size]
+            await asyncio.sleep(0)  # Allow other tasks to run
+    
+    headers = {"Content-Length": str(content_length)}
+    return StreamingResponse(video_stream(), media_type="video/mp4", headers=headers)
 
 # ─── App config ────────────────────────────────────────────────────────
 
