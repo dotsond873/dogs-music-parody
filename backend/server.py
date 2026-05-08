@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -34,6 +35,10 @@ app = FastAPI()
 # Allow large file uploads (up to 100MB)
 from starlette.requests import Request
 app.state.max_request_size = 100 * 1024 * 1024
+
+# Mount static files
+app.mount("/", StaticFiles(directory=ROOT_DIR / "static", html=True), name="static")
+
 api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
