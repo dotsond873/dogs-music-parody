@@ -18,6 +18,8 @@ import tempfile
 import subprocess
 from io import BytesIO
 from PIL import Image
+import cloudinary
+import cloudinary.uploader
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -26,47 +28,36 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = "dancing-video-generator"
-storage_key = None
 
-app = FastAPI()
-# Allow large file uploads (up to 100MB)
-from starlette.requests import Request
-app.state.max_request_size = 100 * 1024 * 1024
 
-# Mount static files
-app.mount("/", StaticFiles(directory=ROOT_DIR / "static", html=True), name="static")
 
-api_router = APIRouter(prefix="/api")
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# ─── Storage ───────────────────────────────────────────────────────────
-
-def init_storage():
-    global storage_key
-    if storage_key:
-        return storage_key
-    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-    resp.raise_for_status()
-    storage_key = resp.json()["storage_key"]
-    logger.info("Storage initialized")
-    return storage_key
+cloudinary.config(
+    cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
+    api_key=os.environ["CLOUDINARY_API_KEY"],
+    api_secret=os.environ["CLOUDINARY_API_SECRET"],
+    secure=True
+)
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    resp = requests.put(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key, "Content-Type": content_type}, data=data, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    public_id = os.path.splitext(path)[0]
+
+    result = cloudinary.uploader.upload(
+        BytesIO(data),
+        public_id=public_id,
+        resource_type="auto",
+        overwrite=True
+    )
+
+    return {"storage_path": result["secure_url"]}
 
 def get_object(path: str) -> tuple:
-    key = init_storage()
-    resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    resp = requests.get(path, timeout=60)
     resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+    return resp.content, resp.headers.get(
+        "Content-Type",
+        "application/octet-stream"
+    )
 
 # ─── Models ────────────────────────────────────────────────────────────
 
