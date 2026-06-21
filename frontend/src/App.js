@@ -3,7 +3,7 @@ import "@/App.css";
 import axios from "axios";
 
 const getApi = () => `${process.env.REACT_APP_BACKEND_URL || window.location.origin}/api`;
-const LOGO_URL = "https://static.prod-images.emergentagent.com/jobs/bf18e4f8-ad8a-42ac-b968-f90b5b8885dc/images/be8dc0b67c3d95ff0e556add8427e5501c84ec7f32d450d82f7231bdedeabc0b.png";
+const LOGO_URL = "";
 
 // ═══════════════════════════════════════════════════════════════════
 // WELCOME PAGE
