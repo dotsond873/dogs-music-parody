@@ -28,9 +28,11 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-APP_NAME = "dancing-video-generator"
 
+APP_NAME = "dogs-music-parody"
 
+app = FastAPI(title=APP_NAME)
+app = FastAPI(title=APP_NAME)
 
 cloudinary.config(
     cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
