@@ -32,7 +32,7 @@ db = client[os.environ['DB_NAME']]
 APP_NAME = "dogs-music-parody"
 
 app = FastAPI(title=APP_NAME)
-app = FastAPI(title=APP_NAME)
+api_router = APIRouter(prefix="/api")
 
 cloudinary.config(
     cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
