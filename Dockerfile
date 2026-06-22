@@ -27,7 +27,7 @@ COPY backend/ ./
 
 # Copy frontend build to static
 COPY --from=frontend-build /app/frontend/build ./static
-
+ 
 # Expose port
 EXPOSE 8000
 
