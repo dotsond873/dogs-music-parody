@@ -410,6 +410,7 @@ async def get_video_file(video_id: str):
 # ─── App config ────────────────────────────────────────────────────────
 
 app.include_router(api_router)
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 app.add_middleware(CORSMiddleware, allow_credentials=True,
                    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
                    allow_methods=["*"], allow_headers=["*"])
