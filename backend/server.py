@@ -421,9 +421,8 @@ async def extract_youtube_audio(request: YouTubeAudioRequest):
             media_type="audio"
         )
 
- 
-
-await db.media_uploads.insert_one(mu.model_dump())
+await db.media_uploads.insert_one( 
+mu.model_dump())
 
 
 
