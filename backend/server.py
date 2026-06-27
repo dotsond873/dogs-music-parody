@@ -364,23 +364,27 @@ async def extract_youtube_audio(request: YouTubeAudioRequest):
             audio_data = f.read()
 
    
-result = put_object(
-    f"{APP_NAME}/uploads/{fid}.mp3",
-    audio_data,
-    "audio/mpeg"
-)
 
-mu = MediaUpload(id=fid, storage_path=result.get("path") or result.get("secure_url") or result.get("url"), 
+        result = put_object(
+            f"{APP_NAME}/uploads/{fid}.mp3",
+            audio_data,
+            "audio/mpeg"
+        )
 
+        mu = MediaUpload(
+            id=fid,
+            storage_path=result.get("path") or result.get("secure_url") or result.get("url"),
+            original_filename=f"{title[:50]}.mp3",
+            content_type="audio/mpeg",
+            size=result["size"],
+            media_type="audio"
+        )
 
-    original_filename=f"{title[:50]}.mp3",
-    content_type="audio/mpeg",
-    size=result["size"],
-    media_type="audio"
-)
-
+ 
 
 await db.media_uploads.insert_one(mu.model_dump())
+
+
 
 logger.info(f"YouTube audio extracted: {title}")
 return mu
