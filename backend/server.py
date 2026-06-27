@@ -323,8 +323,8 @@ async def extract_youtube_audio(request: YouTubeAudioRequest):
 
         mu = MediaUpload(
             id=fid,
-            storage_path=result.get("storage_path") or result.get("path") or result.get("secure_url") or result.get("url"),
-            original_filename=f"{title[:50]}.mp3",
+            
+           storage_path=result.get("url"), original_filename=f"{title[:50]}.mp3",
             content_type="audio/mpeg",
             size=len(audio_data),
             media_type="audio"
@@ -340,11 +340,16 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
     fid = str(uuid.uuid4())
     data = await file.read()
     result = put_object(f"{APP_NAME}/uploads/{fid}.{ext}", data, file.content_type or "application/octet-stream")
-    mu = MediaUpload(id=fid, storage_path=result["path"], original_filename=file.filename,
-                     content_type=file.content_type or "application/octet-stream", size=result["size"], media_type=media_type)
-    await db.media_uploads.insert_one(mu.model_dump())
-    return mu
-
+        mu = MediaUpload(
+        id=fid,
+        storage_path=result.get("url"),
+        original_filename=file.filename,
+        content_type=file.content_type or "application/octet-stream",
+        size=len(data),
+        media_type=media_type
+    )
+ await db.media_uploads.insert_one(mu.model_dump()) 
+return mu
 @api_router.get("/files/{file_id}")
 async def get_file(file_id: str):
     rec = await db.media_uploads.find_one({"id": file_id, "is_deleted": False}, {"_id": 0})
