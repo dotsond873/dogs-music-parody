@@ -370,7 +370,7 @@ result = put_object(
     "audio/mpeg"
 )
 
-mu = MediaUpload(id=fid, storage_path=result.get("path") or result.get("secure_url") or result.get("url"), original_filename=file.filename,
+mu = MediaUpload(id=fid, storage_path=result.get("path") or result.get("secure_url") or result.get("url"), 
 
 
     original_filename=f"{title[:50]}.mp3",
