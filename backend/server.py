@@ -249,7 +249,7 @@ async def startup():
             subprocess.run(['apt-get', 'update', '-qq'], capture_output=True)
             subprocess.run(['apt-get', 'install', '-y', 'ffmpeg', '-qq'], capture_output=True)
             logger.info("FFmpeg installed")
-        init_storage()
+        
         logger.info("App started, storage ready")
     except Exception as e:
         logger.error(f"Startup failed: {e}")
