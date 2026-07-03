@@ -383,17 +383,26 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
         data,
         file.content_type or "application/octet-stream"
     )
-    mu = MediaUpload(
-        id=fid,
-        storage_path=result.get("path") or result.get("secure_url") or result.get("url"),
-        original_filename=file.filename,
-        content_type=file.content_type or "application/octet-stream",
-        size=len(data),
-        media_type=media_type
-    )
-    await db.media_uploads.insert_one(mu.model_dump())
-    return mu
+   result = put_object(
+    f"{APP_NAME}/uploads/{fid}.{ext}",
+    data,
+    file.content_type or "application/octet-stream"
+)
 
+mu = MediaUpload(
+    id=fid,
+    storage_path=result.get("url"),
+    original_filename=file.filename,
+    content_type=file.content_type or "application/octet-stream",
+    size=len(data),
+    media_type=media_type
+)
+
+
+)
+
+await db.media_uploads.insert_one(mu.model_dump())
+return mu
 @api_router.get("/videos", response_model=List[VideoGeneration])
 async def get_videos():
     return await db.video_generations.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
