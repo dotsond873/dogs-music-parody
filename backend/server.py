@@ -378,53 +378,11 @@ async def get_file(file_id: str):
 async def extract_youtube_audio(request: YouTubeAudioRequest):
     return await upload_media_from_url(request.youtube_url, "audio")
 
-
-@api_router.post("/upload-media", response_model=MediaUpload)
-async def upload_media(file: UploadFile = File(...), media_type: str = Query(...)):
-    ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
-    fid = str(uuid.uuid4())
-    data = await file.read()
-    result = put_object(
-        f"{APP_NAME}/uploads/{fid}.{ext}",
-        data,
-        file.content_type or "application/octet-stream"
-    )
-   result = put_object(
-    f"{APP_NAME}/uploads/{fid}.{ext}",
-    data,
-    file.content_type or "application/octet-stream"
-)
-
-mu = MediaUpload(
-    id=fid,
-    storage_path=result.get("url"),
-    original_filename=file.filename,
-    content_type=file.content_type or "application/octet-stream",
-    size=len(data),
-    media_type=media_type
-)
-
-
-)
-
-await db.media_uploads.insert_one(mu.model_dump())
-return mu
-@api_router.get("/videos", response_model=List[VideoGeneration])
 async def get_videos():
-    return await db.video_generations.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return await db.video_generations.find(
+        {}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
 
-@api_router.get("/videos/{video_id}", response_model=VideoGeneration)
-async def get_video(video_id: str):
-    v = await db.video_generations.find_one({"id": video_id}, {"_id": 0})
-    if not v:
-        raise HTTPException(404, "Video not found")
-    return v
-
-@api_router.get("/video-file/{video_id}")
-async def get_video_file(video_id: str):
-    rec = await db.video_generations.find_one({"id": video_id}, {"_id": 0})
-    if not rec or not rec.get("video_path"):
-        raise HTTPException(404, "Video file not found")
     
     data, _ = get_object(rec["video_path"])
     content_length = len(data)
