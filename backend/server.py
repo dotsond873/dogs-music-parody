@@ -339,8 +339,13 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
     ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
     fid = str(uuid.uuid4())
     data = await file.read()
-    result = put_object(f"{APP_NAME}/uploads/{fid}.{ext}", data, file.content_type or "application/octet-stream")
-        mu = MediaUpload(
+    result = put_object(
+        f"{APP_NAME}/uploads/{fid}.{ext}",
+        data,
+        file.content_type or "application/octet-stream"
+    )
+
+    mu = MediaUpload(
         id=fid,
         storage_path=result.get("url"),
         original_filename=file.filename,
@@ -348,8 +353,9 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
         size=len(data),
         media_type=media_type
     )
- await db.media_uploads.insert_one(mu.model_dump()) 
-return mu
+
+    await db.media_uploads.insert_one(mu.model_dump())
+    return mu
 @api_router.get("/files/{file_id}")
 async def get_file(file_id: str):
     rec = await db.media_uploads.find_one({"id": file_id, "is_deleted": False}, {"_id": 0})
