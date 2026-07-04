@@ -353,12 +353,14 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
         size=len(data),
         media_type=media_type
     )
-
-    await db.media_uploads.insert_one(mu.model_dump())
+                                                             await db.media_uploads.insert_one(mu.model_dump())
     return mu
 @api_router.get("/files/{file_id}")
 async def get_file(file_id: str):
-    rec = await db.media_uploads.find_one({"id": file_id, "is_deleted": False}, {"_id": 0})
+rec = await db.media_uploads.find_one(
+    {"id": file_id, "is_deleted": False},
+    {"_id": 0}
+p
     if not rec:
         raise HTTPException(404, "File not found")
     
@@ -378,10 +380,7 @@ async def get_file(file_id: str):
 async def extract_youtube_audio(request: YouTubeAudioRequest):
     return await upload_media_from_url(request.youtube_url, "audio")
 
-async def get_videos():
-    return await db.video_generations.find(
-        {}, {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
+
 
     
     data, _ = get_object(rec["video_path"])
