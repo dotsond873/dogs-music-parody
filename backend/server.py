@@ -277,68 +277,18 @@ async def get_welcome_video():
     headers = {"Content-Length": str(content_length)}
     return StreamingResponse(video_stream(), media_type="video/mp4", headers=headers)
 
+
 @api_router.post("/youtube-audio", response_model=MediaUpload)
 async def extract_youtube_audio(request: YouTubeAudioRequest):
-    fid = str(uuid.uuid4())
+    return await upload_media_from_url(request.youtube_url, "audio")
 
-    with tempfile.TemporaryDirectory() as td:
-        ydl_opts = {
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
-            "outtmpl": f"{td}/audio.%(ext)s",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192"
-            }],
-            "quiet": True,
-            "no_warnings": True,
-            "geo_bypass": True,
-            "geo_bypass_country": "US",
-        }
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(request.youtube_url, download=True)
-                title = info.get("title", "audio")
-        except Exception as yt_err:
-            raise HTTPException(500, f"YouTube extraction failed: {str(yt_err)[:200]}")
-
-        ap = None
-        for fn in os.listdir(td):
-            if fn.endswith(".mp3"):
-                ap = os.path.join(td, fn)
-                break
-
-        if not ap:
-            raise HTTPException(500, "Could not extract audio from YouTube")
-
-        with open(ap, "rb") as f:
-            audio_data = f.read()
-
-        result = put_object(
-            f"{APP_NAME}/uploads/{fid}.mp3",
-            audio_data,
-            "audio/mpeg"
-        )
-
-        mu = MediaUpload(
-            id=fid,
-            
-           storage_path=result.get("url"), original_filename=f"{title[:50]}.mp3",
-            content_type="audio/mpeg",
-            size=len(audio_data),
-            media_type="audio"
-        )
-
-        await db.media_uploads.insert_one(mu.model_dump())
-        logger.info(f"YouTube audio extracted: {title}")
-        return mu
 
 @api_router.post("/upload-media", response_model=MediaUpload)
 async def upload_media(file: UploadFile = File(...), media_type: str = Query(...)):
     ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
     fid = str(uuid.uuid4())
     data = await file.read()
+
     result = put_object(
         f"{APP_NAME}/uploads/{fid}.{ext}",
         data,
@@ -352,9 +302,13 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
         content_type=file.content_type or "application/octet-stream",
         size=len(data),
         media_type=media_type
-    )
-                                                             await db.media_uploads.insert_one(mu.model_dump())
+    
+
+            )
+    
+    await db.media_uploads.insert_one(mu.model_dump())
     return mu
+
 @api_router.get("/files/{file_id}")
 async def get_file(file_id: str):
 rec = await db.media_uploads.find_one(
