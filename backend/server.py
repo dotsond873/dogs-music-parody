@@ -360,7 +360,8 @@ async def get_file(file_id: str):
 rec = await db.media_uploads.find_one(
     {"id": file_id, "is_deleted": False},
     {"_id": 0}
-p
+)
+
     if not rec:
         raise HTTPException(404, "File not found")
     
