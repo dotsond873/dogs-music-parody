@@ -311,25 +311,29 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
 
 @api_router.get("/files/{file_id}")
 async def get_file(file_id: str):
-rec = await db.media_uploads.find_one(
-    {"id": file_id, "is_deleted": False},
-    {"_id": 0}
-)
+    rec = await db.media_uploads.find_one(
+        {"id": file_id, "is_deleted": False},
+        {"_id": 0}
+    )
 
     if not rec:
         raise HTTPException(404, "File not found")
-    
+
     data, ct = get_object(rec["storage_path"])
     content_length = len(data)
-    
+
     async def file_stream():
-        chunk_size = 1024 * 1024  # 1MB chunks
+        chunk_size = 1024 * 1024
         for i in range(0, len(data), chunk_size):
             yield data[i:i + chunk_size]
-            await asyncio.sleep(0)  # Allow other tasks to run
-    
+            await asyncio.sleep(0)
+
     headers = {"Content-Length": str(content_length)}
-    return StreamingResponse(file_stream(), media_type=rec.get("content_type", "application/octet-stream"), headers=headers)
+    return StreamingResponse(
+        file_stream(),
+        media_type=rec.get("content_type", "application/octet-stream"),
+        headers=headers
+    )
 
 @api_router.post("/youtube-audio", response_model=MediaUpload)
 async def extract_youtube_audio(request: YouTubeAudioRequest):
