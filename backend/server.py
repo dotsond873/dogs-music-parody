@@ -297,6 +297,10 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
 print("UPLOAD RESULT:", result)
     mu = MediaUpload(
         id=fid,
+        print("UPLOAD RESULT:", result)
+
+    mu = MediaUpload(
+        id=fid,
         storage_path=result.get("path") or result.get("secure_url") or result.get("url"),
         original_filename=file.filename,
         content_type=file.content_type or "application/octet-stream",
