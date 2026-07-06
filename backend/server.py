@@ -307,7 +307,7 @@ mu = MediaUpload(
     
 
         )
- await  db.media_uploads.insert_one(mu.model_ dump()) 
+ await db.media_uploads.insert_one(mu.model_ dump()) 
  return mu
 
 @api_router.get("/files/{file_id}")
