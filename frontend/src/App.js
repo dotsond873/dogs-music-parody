@@ -3,7 +3,7 @@ import "@/App.css";
 import axios from "axios";
 
 const getApi = () => `${process.env.REACT_APP_BACKEND_URL || window.location.origin}/api`;
-const LOGO_URL = "";
+const LOGO_URL = null;
 
 // ═══════════════════════════════════════════════════════════════════
 // WELCOME PAGE
@@ -51,7 +51,9 @@ function WelcomePage({ onEnter }) {
          data-testid="welcome-page">
 
       {/* Logo */}
-      <img src={LOGO_URL} alt="NAUGHTY DAWGZ" className="w-full max-w-2xl mb-6" data-testid="welcome-logo" />
+      {LOGO_URL && (
+  <img src={LOGO_URL} alt="NAUGHTY DAWGZ" className="w-full max-w-2xl mb-6" data-testid="welcome-logo" />
+)}
 
       {/* Video */}
       {hasVideo ? (
