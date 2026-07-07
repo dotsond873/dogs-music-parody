@@ -307,7 +307,7 @@ async def upload_media(file: UploadFile = File(...), media_type: str = Query(...
         media_type=media_type
     )
 
-        )
+        
 
     doc = mu.model_dump()
     await db.media_uploads.insert_one(doc)
