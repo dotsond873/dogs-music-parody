@@ -3,7 +3,7 @@ import "@/App.css";
 import axios from "axios";
 
 const getApi = () => `${process.env.REACT_APP_BACKEND_URL || window.location.origin}/api`;
-const LOGO_URL = null;
+const LOGO_URL = "/logo.png";
 
 // ═══════════════════════════════════════════════════════════════════
 // WELCOME PAGE
