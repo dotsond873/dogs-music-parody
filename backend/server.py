@@ -257,7 +257,128 @@ async def startup():
 @api_router.get("/")
 async def root():
     return {"message": "NAUGHTY DAWGZ - ANOTHER ODB PRODUCTION API"}
+@api_router.post("/welcome-video")
+async def upload_welcome_video(file: UploadFile = File(...)):
+    """Upload and permanently store Rocco's welcome video."""
 
+    if not file.content_type or not file.content_type.startswith("video/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Please select a valid video file."
+        )
+
+    data = await file.read()
+
+    if not data:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected video is empty."
+        )
+
+    fid = str(uuid.uuid4())
+    extension = (
+        file.filename.rsplit(".", 1)[-1].lower()
+        if file.filename and "." in file.filename
+        else "mp4"
+    )
+
+    result = put_object(
+        f"{APP_NAME}/welcome/{fid}.{extension}",
+        data,
+        file.content_type
+    )
+
+    storage_path = result.get("storage_path")
+    if not storage_path:
+        raise HTTPException(
+            status_code=500,
+            detail="The video could not be stored."
+        )
+
+    # Mark any previous welcome video as deleted.
+    await db.media_uploads.update_many(
+        {"media_type": "welcome_video", "is_deleted": False},
+        {"$set": {"is_deleted": True}}
+    )
+
+    record = {
+        "id": fid,
+        "storage_path": storage_path,
+        "original_filename": file.filename or "rocko-welcome.mp4",
+        "content_type": file.content_type,
+        "media_type": "welcome_video",
+        "size_bytes": len(data),
+        "is_deleted": False,
+        "created_at": datetime.now(timezone.utc)
+    }
+
+    await db.media_uploads.insert_one(record)
+
+    return {
+        "message": "Rocco's welcome video uploaded successfully.",
+        "id": fid
+  {  
+@api_router.post("/welcome-video")
+async def upload_welcome_video(file: UploadFile = File(...)):
+    """Upload and permanently store Rocco's welcome video."""
+
+    if not file.content_type or not file.content_type.startswith("video/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Please select a valid video file."
+        )
+
+    data = await file.read()
+
+    if not data:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected video is empty."
+        )
+
+    fid = str(uuid.uuid4())
+    extension = (
+        file.filename.rsplit(".", 1)[-1].lower()
+        if file.filename and "." in file.filename
+        else "mp4"
+    )
+
+    result = put_object(
+        f"{APP_NAME}/welcome/{fid}.{extension}",
+        data,
+        file.content_type
+    )
+
+    storage_path = result.get("storage_path")
+    if not storage_path:
+        raise HTTPException(
+            status_code=500,
+            detail="The video could not be stored."
+        )
+
+    # Mark any previous welcome video as deleted.
+    await db.media_uploads.update_many(
+        {"media_type": "welcome_video", "is_deleted": False},
+        {"$set": {"is_deleted": True}}
+    )
+
+    record = {
+        "id": fid,
+        "storage_path": storage_path,
+        "original_filename": file.filename or "rocko-welcome.mp4",
+        "content_type": file.content_type,
+        "media_type": "welcome_video",
+        "size_bytes": len(data),
+        "is_deleted": False,
+        "created_at": datetime.now(timezone.utc)
+    }
+
+    await db.media_uploads.insert_one(record)
+
+    return {
+        "message": "Rocco's welcome video uploaded successfully.",
+        "id": fid
+    }
 @api_router.get("/welcome-video")
 async def get_welcome_video():
     """Get the welcome video for the landing page"""
