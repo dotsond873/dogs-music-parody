@@ -19,8 +19,11 @@ function WelcomePage({ onEnter }) {
     axios.head(`${API}/welcome-video`).then(() => {
       setHasVideo(true);
       setVideoSrc(`${API}/welcome-video?t=${Date.now()}`);
-    }).catch(() => setHasVideo(false));
-  }, [API]);
+    }
+catch (err) {
+  console.error(err);
+  alert("Upload failed. Try a smaller video or check your connection.");
+}
 
   const handleUploadWelcome = async (e) => {
     const file = e.target.files[0];
