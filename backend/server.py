@@ -317,7 +317,7 @@ async def upload_welcome_video(file: UploadFile = File(...)):
     return {
         "message": "Rocco's welcome video uploaded successfully.",
         "id": fid
-  {  
+  }  
 @api_router.post("/welcome-video")
 async def upload_welcome_video(file: UploadFile = File(...)):
     """Upload and permanently store Rocco's welcome video."""
