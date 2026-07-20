@@ -61,24 +61,15 @@ function WelcomePage({ onEnter }) {
 )}
 
       {/* Video */}
-      {hasVideo ? (
-        <div className="w-full max-w-lg mb-8">
-          <video autoPlay loop muted playsInline className="w-full border-2 border-yellow-500 shadow-lg"
-                 style={{ boxShadow: "0 0 30px rgba(255,215,0,0.3)" }}
-                 src={videoSrc} data-testid="welcome-video" />
-        </div>
-      ) : (
-        <div className="w-full max-w-lg mb-8">
-          <label className="block p-8 text-center border-2 border-dashed border-yellow-500 cursor-pointer hover:bg-yellow-500/10 transition-colors"
-                 data-testid="welcome-video-upload">
-            <input type="file" accept="video/*" onChange={handleUploadWelcome} className="hidden" disabled={uploading} />
-            <p className="text-yellow-500 font-bold uppercase text-sm">
-              {uploading ? "UPLOADING ROCCO'S VIDEO..." : "TAP TO UPLOAD ROCCO'S VIDEO"}
-            </p>
-            <p className="text-gray-500 text-xs mt-1">Upload a video of Rocco the French Bulldog</p>
-          </label>
-        </div>
-      )}
+      <div className="w-full max-w-lg mb-8">
+  <video
+    src={videoSrc || `${API}/welcome-video?t=${Date.now()}`}
+    autoPlay
+    muted
+    playsInline
+    loop
+    className="w-full border-2 border-yellow-500 shadow-lg"
+    style={{ boxShadow: "0 0 30px rgba(255,215,0,0.3)" }}
 
       {/* Enter Button */}
       <button onClick={onEnter}
