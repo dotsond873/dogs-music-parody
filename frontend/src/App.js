@@ -15,15 +15,17 @@ function WelcomePage({ onEnter }) {
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    // Check if welcome video exists
-    axios.head(`${API}/welcome-video`).then(() => {
+  axios
+    .head(`${API}/welcome-video`)
+    .then(() => {
       setHasVideo(true);
       setVideoSrc(`${API}/welcome-video?t=${Date.now()}`);
-    }
-catch (err) {
-  console.error(err);
-  alert("Upload failed. Try a smaller video or check your connection.");
-}
+    })
+    .catch(() => {
+      setHasVideo(false);
+    });
+}, [API]);
+
 
   const handleUploadWelcome = async (e) => {
     const file = e.target.files[0];
