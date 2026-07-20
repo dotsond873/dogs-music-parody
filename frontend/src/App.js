@@ -60,8 +60,9 @@ function WelcomePage({ onEnter }) {
   <img src={LOGO_URL} alt="NAUGHTY DAWGZ" className="w-full max-w-2xl mb-6" data-testid="welcome-logo" />
 )}
 
+     
       {/* Video */}
-      <div className="w-full max-w-lg mb-8">
+<div className="w-full max-w-lg mb-8">
   <video
     src={videoSrc || `${API}/welcome-video?t=${Date.now()}`}
     autoPlay
@@ -70,6 +71,9 @@ function WelcomePage({ onEnter }) {
     loop
     className="w-full border-2 border-yellow-500 shadow-lg"
     style={{ boxShadow: "0 0 30px rgba(255,215,0,0.3)" }}
+    data-testid="welcome-video"
+  />
+</div>
 
       {/* Enter Button */}
       <button onClick={onEnter}
