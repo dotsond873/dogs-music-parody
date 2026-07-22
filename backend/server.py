@@ -479,7 +479,53 @@ async def extract_youtube_audio(request: YouTubeAudioRequest):
     return StreamingResponse(video_stream(), media_type="video/mp4", headers=headers)
 
 # ─── App config ────────────────────────────────────────────────────────
+@api_router.post("/generate-video")
+async def generate_video(request: GenerateVideoRequest):
+    vid = str(uuid.uuid4())
 
+    record = {
+        "id": vid,
+        "subject_media_ids": request.subject_media_ids,
+        "audio_file_id": request.audio_file_id,
+        "prompt": request.prompt,
+        "duration": request.duration,
+        "status": "pending",
+        "video_path": None,
+        "error_message": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+    }
+
+    await db.video_generations.insert_one(record.copy())
+
+    asyncio.create_task(
+        generate_video_background(
+            vid=vid,
+            prompt=request.prompt,
+            duration=request.duration,
+            audio_file_id=request.audio_file_id,
+            subject_media_ids=request.subject_media_ids,
+        )
+    )
+
+    record.pop("_id", None)
+    return record
+
+
+@api_router.get("/videos/{video_id}")
+async def get_video_status(video_id: str):
+    record = await db.video_generations.find_one(
+        {"id": video_id},
+        {"_id": 0},
+    )
+
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="Video generation not found",
+        )
+
+    return record
 app.include_router(api_router)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 app.add_middleware(CORSMiddleware, allow_credentials=True,
