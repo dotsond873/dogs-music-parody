@@ -235,20 +235,36 @@ function MainApp() {
                 <div className="text-xs mt-1" style={{ color: "#888" }}>MP3, M4A, or any audio/video file from your phone</div>
               </label>
 
-              {/* Secondary: YouTube (with disclaimer) */}
-              <div className="text-center text-xs font-bold mb-2" style={{ color: "#666" }}>OR TRY YOUTUBE (some songs blocked)</div>
-              <div className="flex gap-2 mb-2">
-                <input type="text" value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)}
-                       placeholder="Paste YouTube URL..."
-                       className="flex-1 px-3 py-2 text-xs border-2 border-gray-600 focus:border-yellow-500 focus:outline-none bg-black text-white"
-                       disabled={extracting} data-testid="youtube-url-input" />
-                <button onClick={handleYouTube} disabled={extracting || !youtubeUrl.trim()}
-                        className="neo-button px-4 py-2 text-xs font-bold uppercase border-2"
-                        style={{ backgroundColor: extracting ? "#333" : "#FFD700", color: "#0A0A0A", borderColor: "#FFD700" }}
-                        data-testid="youtube-extract-btn">
-                  {extracting ? "..." : "GET"}
-                </button>
-              </div>
+               {/* Secondary: Pixabay free music */}
+<div className="text-center mt-4">
+  <div
+    className="text-center text-xs font-bold mb-2"
+    style={{ color: "#666" }}
+  >
+    OR FIND FREE MUSIC
+  </div>
+
+  <a
+    href="https://pixabay.com/music/"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="inline-block w-full px-4 py-3 text-sm font-black uppercase border-2 border-yellow-500"
+    style={{
+      backgroundColor: "#FFD700",
+      color: "#0A0A0A",
+      textDecoration: "none"
+    }}
+  >
+    BROWSE PIXABAY MUSIC
+  </a>
+
+  <div
+    className="text-center text-xs mt-2"
+    style={{ color: "#666" }}
+  >
+    Download an MP3, then upload it above.
+  </div>
+</div> 
 
               {audioFile && (
                 <div className="mt-2 p-2 border border-green-700 text-xs font-bold" style={{ backgroundColor: "rgba(0,128,0,0.15)", color: "#4ADE80" }}
