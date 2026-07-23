@@ -335,12 +335,22 @@ async def upload_image_to_1min(
             f"{response.text[:500]}"
         )
 
-    payload = response.json()
-
-    asset_path = (
-        payload.get("fileContent", {}).get("path")
-        or payload.get("asset", {}).get("key")
-    )
+    payload = {
+    "type": "IMAGE_TO_VIDEO",
+    "model": "kling",
+    "conversationId": "IMAGE_TO_VIDEO",
+    "async": True,
+    "promptObject": {
+        "imageUrl": image_path,
+        "prompt": prompt,
+        "duration": 5,
+        "aspect_ratio": normalize_aspect_ratio(aspect_ratio),
+        "mode": "std",
+        "version": "1.6",
+        "cfg_scale": 0.5,
+        "negative_prompt": "",
+    },
+}
 
     if not asset_path:
         raise RuntimeError(
