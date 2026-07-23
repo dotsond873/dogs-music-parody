@@ -389,7 +389,7 @@ async def start_1min_video_job(
 
     payload = {
         "type": "IMAGE_TO_VIDEO",
-        "model": "luma",
+        "model": "kling",
         "async": True,
         "promptObject": {
             "imageUrl": image_path,
