@@ -1,519 +1,1070 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query
-from fastapi.responses import Response, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
+from __future__ import annotations
+
+import asyncio
 import logging
-logger = logging.getLogger(__name__)
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+import mimetypes
+import os
+import shutil
+import subprocess
+import tempfile
 import uuid
 from datetime import datetime, timezone
-import requests
-import asyncio
-import yt_dlp
-import tempfile
-import subprocess
 from io import BytesIO
-from PIL import Image
+from pathlib import Path
+from typing import List, Optional
+
 import cloudinary
 import cloudinary.uploader
+import httpx
+from dotenv import load_dotenv
+from fastapi import APIRouter, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, ConfigDict, Field
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# ============================================================
+# Configuration
+# ============================================================
 
+ROOT_DIR = Path(__file__).resolve().parent
+load_dotenv(ROOT_DIR / ".env")
+
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger("dogs-music-parody")
 
 APP_NAME = "dogs-music-parody"
+ONE_MIN_BASE_URL = "https://api.1min.ai"
 
-app = FastAPI(title=APP_NAME)
-api_router = APIRouter(prefix="/api")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+ALLOWED_IMAGE_EXTENSIONS = {
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+    "gif",
+}
+
+ALLOWED_AUDIO_EXTENSIONS = {
+    "mp3",
+    "m4a",
+    "wav",
+    "aac",
+    "ogg",
+    "flac",
+}
+
+ALLOWED_VIDEO_EXTENSIONS = {
+    "mp4",
+    "mov",
+    "m4v",
+    "webm",
+}
+
+
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+
+    if not value:
+        raise RuntimeError(
+            f"Missing required environment variable: {name}"
+        )
+
+    return value
+
+
+MONGO_URL = require_env("MONGO_URL")
+DB_NAME = require_env("DB_NAME")
+ONE_MIN_AI_API_KEY = require_env("ONE_MIN_AI_API_KEY")
+
 
 cloudinary.config(
-    cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
-    api_key=os.environ["CLOUDINARY_API_KEY"],
-    api_secret=os.environ["CLOUDINARY_API_SECRET"],
-    secure=True
+    cloud_name=require_env("CLOUDINARY_CLOUD_NAME"),
+    api_key=require_env("CLOUDINARY_API_KEY"),
+    api_secret=require_env("CLOUDINARY_API_SECRET"),
+    secure=True,
 )
 
-def put_object(path: str, data: bytes, content_type: str) -> dict:
-    public_id = os.path.splitext(path)[0]
 
-    result = cloudinary.uploader.upload(
-        BytesIO(data),
-        public_id=public_id,
-        resource_type="auto",
-        overwrite=True
-    )
+mongo_client = AsyncIOMotorClient(MONGO_URL)
+db = mongo_client[DB_NAME]
 
-    return {"storage_path": result["secure_url"]}
 
-def get_object(path: str) -> tuple:
-    resp = requests.get(path, timeout=60)
-    resp.raise_for_status()
-    return resp.content, resp.headers.get(
-        "Content-Type",
-        "application/octet-stream"
-    )
+app = FastAPI(
+    title="Naughty Dawgz API",
+    version="2.0.0",
+)
 
-# ─── Models ────────────────────────────────────────────────────────────
+api_router = APIRouter(prefix="/api")
+
+
+# ============================================================
+# Models
+# ============================================================
 
 class MediaUpload(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4())
+    )
+
     storage_path: str
     original_filename: str
     content_type: str
     size: int
     media_type: str
     is_deleted: bool = False
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-class VideoGeneration(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    subject_media_ids: List[str]
-    audio_file_id: Optional[str] = None
-    prompt: str
-    duration: int = 30
-    status: str = "pending"
-    video_path: Optional[str] = None
-    error_message: Optional[str] = None
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    completed_at: Optional[str] = None
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(
+            timezone.utc
+        ).isoformat()
+    )
+
 
 class GenerateVideoRequest(BaseModel):
     subject_media_ids: List[str]
     audio_file_id: Optional[str] = None
     prompt: str
-    duration: int = 30
+    duration: int = 10
+    aspect_ratio: str = "16:9"
 
-class YouTubeAudioRequest(BaseModel):
-    youtube_url: str
 
-# ─── Image resize ──────────────────────────────────────────────────────
+class VideoGeneration(BaseModel):
+    model_config = ConfigDict(extra="ignore")
 
-def resize_image_to_1280x720(image_bytes: bytes) -> bytes:
-    """Resize any image to exactly 1280x720 (required by Sora 2)"""
-    img = Image.open(BytesIO(image_bytes))
-    img = img.convert("RGB")
-    img = img.resize((1280, 720), Image.LANCZOS)
-    buf = BytesIO()
-    img.save(buf, format="JPEG", quality=95)
-    buf.seek(0)
-    logger.info(f"Resized image to 1280x720 ({len(buf.getvalue())} bytes)")
-    return buf.getvalue()
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4())
+    )
 
-# ─── Sora 2 video generation ──────────────────────────────────────────
+    subject_media_ids: List[str]
+    audio_file_id: Optional[str] = None
+    prompt: str
+    duration: int = 10
+    aspect_ratio: str = "16:9"
 
-def get_sora_duration(d: int) -> int:
-    if d <= 4: return 4
-    if d <= 8: return 8
-    return 12
+    status: str = "pending"
+    provider_job_id: Optional[str] = None
+    video_path: Optional[str] = None
+    error_message: Optional[str] = None
 
-def friendly_error(e: str) -> str:
-    el = e.lower()
-    if "insufficient_balance" in el or "insufficient balance" in el:
-        return "Insufficient balance. Go to Profile > Universal Key > Add Balance."
-    if "budget_exceeded" in el or "budget has been exceeded" in el:
-        return "Budget limit reached! Add more balance in Profile > Universal Key > Add Balance."
-    if "inpaint image must match" in el:
-        return "Image size mismatch (auto-resize should fix this). Try again."
-    return e
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(
+            timezone.utc
+        ).isoformat()
+    )
 
-async def update_video_status(vid: str, status: str, **kw):
-    await db.video_generations.update_one({"id": vid}, {"$set": {"status": status, **kw}})
+    completed_at: Optional[str] = None
 
-async def generate_video_with_sora(prompt: str, duration: int, subject_media_ids: List[str]) -> bytes:
-    """Generate video using Sora 2 — resizes image to 1280x720 first"""
-    sora_dur = get_sora_duration(duration)
-    api_key = os.environ['EMERGENT_LLM_KEY']
-    url = "https://integrations.emergentagent.com/llm/openai/v1/videos"
 
-    form_data = {"model": "sora-2", "size": "1280x720", "seconds": str(sora_dur)}
-    files = None
-    has_image = False
+# ============================================================
+# File helpers
+# ============================================================
 
-    # Load + resize the first uploaded image
-    if subject_media_ids:
-        try:
-            rec = await db.media_uploads.find_one({"id": subject_media_ids[0], "is_deleted": False}, {"_id": 0})
-            if rec and rec.get("media_type") == "image":
-                raw, _ = get_object(rec["storage_path"])
-                resized = resize_image_to_1280x720(raw)
-                files = {"input_reference": ("subject.jpg", resized, "image/jpeg")}
-                has_image = True
-                logger.info(f"Prepared resized image for Sora 2")
-        except Exception as exc:
-            logger.warning(f"Image prep failed, falling back to text-only: {exc}")
+def file_extension(filename: Optional[str]) -> str:
+    if not filename or "." not in filename:
+        return ""
 
-    # When using input_reference, prefix prompt to tell Sora to keep the subject
-    if has_image:
-        form_data["prompt"] = f"Animate the exact subject shown in the reference image. Keep their appearance, features, and body exactly as shown. {prompt}"
-    else:
-        form_data["prompt"] = prompt
+    return filename.rsplit(".", 1)[-1].lower().strip()
 
-    headers = {"Authorization": f"Bearer {api_key}"}
 
-    # Initiate generation
-    logger.info(f"Sending to Sora 2: prompt={prompt[:60]}... dur={sora_dur} image={'yes' if files else 'no'}")
-    resp = requests.post(url, headers=headers, data=form_data, files=files, timeout=120)
+def validate_upload(
+    filename: Optional[str],
+    content_type: Optional[str],
+    media_type: str,
+    size: int,
+) -> str:
 
-    if resp.status_code != 200:
-        logger.error(f"Sora 2 init failed [{resp.status_code}]: {resp.text}")
-        resp.raise_for_status()
+    if size <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected file is empty.",
+        )
 
-    video_id = resp.json().get("id")
-    if not video_id:
-        raise Exception(f"No video ID returned: {resp.text}")
+    if size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="File is larger than 50 MB.",
+        )
 
-    logger.info(f"Sora 2 job started: {video_id}")
+    ext = file_extension(filename)
+    normalized_type = media_type.strip().lower()
 
-    # Poll until done
-    for elapsed in range(10, 910, 10):
-        await asyncio.sleep(10)
-        sr = requests.get(f"{url}/{video_id}", headers=headers, timeout=30)
-        sr.raise_for_status()
-        sd = sr.json()
-        st = sd.get("status", "unknown")
-        logger.info(f"  [{elapsed}s] status={st}")
+    if normalized_type in {"image", "subject"}:
+        valid_content_type = (
+            content_type is not None
+            and content_type.startswith("image/")
+        )
 
-        if st == "completed":
-            dl = requests.get(f"{url}/{video_id}/content", headers=headers, timeout=120)
-            dl.raise_for_status()
-            logger.info(f"Downloaded video: {len(dl.content)} bytes")
-            return dl.content
-        if st == "failed":
-            raise Exception(f"Sora 2 failed: {sd.get('error', sd)}")
+        if (
+            ext not in ALLOWED_IMAGE_EXTENSIONS
+            and not valid_content_type
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Select a valid image file.",
+            )
 
-    raise Exception("Sora 2 timed out after 15 minutes")
+        return "image"
 
-async def merge_audio(video_bytes: bytes, audio_file_id: Optional[str]) -> bytes:
-    """Replace video audio with user's song using FFmpeg"""
-    if not audio_file_id:
-        return video_bytes
+    if normalized_type in {"audio", "music"}:
+        valid_content_type = (
+            content_type is not None
+            and content_type.startswith("audio/")
+        )
+
+        if (
+            ext not in ALLOWED_AUDIO_EXTENSIONS
+            and not valid_content_type
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Select a valid audio file.",
+            )
+
+        return "audio"
+
+    if normalized_type == "welcome_video":
+        valid_content_type = (
+            content_type is not None
+            and content_type.startswith("video/")
+        )
+
+        if (
+            ext not in ALLOWED_VIDEO_EXTENSIONS
+            and not valid_content_type
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Select a valid video file.",
+            )
+
+        return "welcome_video"
+
+    raise HTTPException(
+        status_code=400,
+        detail="Invalid media type.",
+    )
+
+
+# ============================================================
+# Cloudinary
+# ============================================================
+
+def upload_to_cloudinary(
+    path: str,
+    data: bytes,
+    resource_type: str = "auto",
+) -> str:
+
+    public_id = str(Path(path).with_suffix(""))
+
+    result = cloudinary.uploader.upload(
+        BytesIO(data),
+        public_id=public_id,
+        resource_type=resource_type,
+        overwrite=True,
+    )
+
+    secure_url = result.get("secure_url")
+
+    if not secure_url:
+        raise RuntimeError(
+            "Cloudinary did not return a file URL."
+        )
+
+    return secure_url
+
+
+async def download_bytes(
+    url: str,
+    timeout: float = 180.0,
+) -> bytes:
+
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=True,
+    ) as client:
+
+        response = await client.get(url)
+        response.raise_for_status()
+
+        return response.content
+
+
+# ============================================================
+# 1min.AI
+# ============================================================
+
+async def upload_image_to_1min(
+    filename: str,
+    content_type: str,
+    image_data: bytes,
+) -> str:
+
+    headers = {
+        "API-KEY": ONE_MIN_AI_API_KEY,
+    }
+
+    files = {
+        "asset": (
+            filename,
+            image_data,
+            content_type,
+        )
+    }
+
+    async with httpx.AsyncClient(
+        timeout=120.0
+    ) as client:
+
+        response = await client.post(
+            f"{ONE_MIN_BASE_URL}/api/assets",
+            headers=headers,
+            files=files,
+        )
+
+    if response.status_code >= 400:
+        raise RuntimeError(
+            "1min.AI image upload failed "
+            f"({response.status_code}): "
+            f"{response.text[:500]}"
+        )
+
+    payload = response.json()
+
+    asset_path = (
+        payload.get("fileContent", {}).get("path")
+        or payload.get("asset", {}).get("key")
+    )
+
+    if not asset_path:
+        raise RuntimeError(
+            "1min.AI did not return an asset path: "
+            f"{payload}"
+        )
+
+    return asset_path
+
+
+def normalize_duration(duration: int) -> str:
+    if duration >= 10:
+        return "10s"
+
+    return "5s"
+
+
+def normalize_aspect_ratio(value: str) -> str:
+    allowed = {
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "21:9",
+        "9:21",
+    }
+
+    if value in allowed:
+        return value
+
+    return "16:9"
+
+
+async def start_1min_video_job(
+    image_path: str,
+    prompt: str,
+    duration: int,
+    aspect_ratio: str,
+) -> str:
+
+    headers = {
+        "API-KEY": ONE_MIN_AI_API_KEY,
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "type": "IMAGE_TO_VIDEO",
+        "model": "luma",
+        "async": True,
+        "promptObject": {
+            "imageUrl": image_path,
+            "prompt": prompt,
+            "modelName": "ray-v2",
+            "duration": normalize_duration(duration),
+            "aspectRatio": normalize_aspect_ratio(
+                aspect_ratio
+            ),
+            "resolution": "720p",
+            "loop": False,
+        },
+    }
+
+    async with httpx.AsyncClient(
+        timeout=120.0
+    ) as client:
+
+        response = await client.post(
+            f"{ONE_MIN_BASE_URL}/api/features",
+            headers=headers,
+            json=payload,
+        )
+
+    if response.status_code >= 400:
+        raise RuntimeError(
+            "1min.AI generation request failed "
+            f"({response.status_code}): "
+            f"{response.text[:500]}"
+        )
+
+    result = response.json()
+    record = result.get("aiRecord") or {}
+
+    job_id = (
+        record.get("uuid")
+        or result.get("uuid")
+    )
+
+    if not job_id:
+        raise RuntimeError(
+            "1min.AI did not return a job ID: "
+            f"{result}"
+        )
+
+    return job_id
+
+
+async def wait_for_1min_video(
+    job_id: str,
+) -> str:
+
+    headers = {
+        "API-KEY": ONE_MIN_AI_API_KEY,
+    }
+
+    async with httpx.AsyncClient(
+        timeout=60.0,
+        follow_redirects=True,
+    ) as client:
+
+        for _ in range(90):
+
+            response = await client.get(
+                f"{ONE_MIN_BASE_URL}/api/results/{job_id}",
+                headers=headers,
+            )
+
+            response.raise_for_status()
+
+            payload = response.json()
+            record = payload.get("aiRecord")
+
+            if not record:
+                raise RuntimeError(
+                    "1min.AI returned an unknown job ID."
+                )
+
+            status = str(
+                record.get("status", "")
+            ).upper()
+
+            if status == "SUCCESS":
+                temporary_url = record.get(
+                    "temporaryUrl"
+                )
+
+                if temporary_url:
+                    return temporary_url
+
+                result_object = (
+                    record
+                    .get("aiRecordDetail", {})
+                    .get("resultObject")
+                    or []
+                )
+
+                if (
+                    isinstance(result_object, list)
+                    and result_object
+                ):
+                    first_result = result_object[0]
+
+                    if (
+                        isinstance(first_result, str)
+                        and first_result.startswith("http")
+                    ):
+                        return first_result
+
+                raise RuntimeError(
+                    "1min.AI completed but returned "
+                    "no download URL."
+                )
+
+            if status in {
+                "FAILURE",
+                "FAILED",
+                "ERROR",
+            }:
+                error_result = (
+                    record
+                    .get("aiRecordDetail", {})
+                    .get("resultObject")
+                )
+
+                if isinstance(error_result, dict):
+                    message = (
+                        error_result.get("message")
+                        or str(error_result)
+                    )
+                else:
+                    message = str(
+                        error_result
+                        or "Unknown 1min.AI error"
+                    )
+
+                raise RuntimeError(message)
+
+            await asyncio.sleep(10)
+
+    raise RuntimeError(
+        "1min.AI video generation timed out "
+        "after 15 minutes."
+    )
+
+
+# ============================================================
+# Audio merging
+# ============================================================
+
+async def merge_music(
+    video_data: bytes,
+    audio_data: bytes,
+    audio_ext: str,
+) -> bytes:
+
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError(
+            "FFmpeg is not installed on the server."
+        )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+
+        video_path = Path(temp_dir) / "video.mp4"
+        audio_path = Path(
+            temp_dir
+        ) / f"music.{audio_ext or 'mp3'}"
+        output_path = Path(temp_dir) / "finished.mp4"
+
+        video_path.write_bytes(video_data)
+        audio_path.write_bytes(audio_data)
+
+        process = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(video_path),
+            "-i",
+            str(audio_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        _, stderr = await process.communicate()
+
+        if (
+            process.returncode != 0
+            or not output_path.exists()
+        ):
+            raise RuntimeError(
+                "FFmpeg could not add the music: "
+                + stderr.decode(
+                    errors="ignore"
+                )[-600:]
+            )
+
+        return output_path.read_bytes()
+
+
+# ============================================================
+# Database status helpers
+# ============================================================
+
+async def set_video_status(
+    video_id: str,
+    status: str,
+    **fields: object,
+) -> None:
+
+    await db.video_generations.update_one(
+        {"id": video_id},
+        {
+            "$set": {
+                "status": status,
+                **fields,
+            }
+        },
+    )
+
+
+# ============================================================
+# Background video job
+# ============================================================
+
+async def generate_video_background(
+    video_id: str,
+) -> None:
+
     try:
-        rec = await db.media_uploads.find_one({"id": audio_file_id, "is_deleted": False}, {"_id": 0})
-        if not rec:
-            return video_bytes
-        audio_data, _ = get_object(rec["storage_path"])
-        with tempfile.TemporaryDirectory() as td:
-            vp, ap, op = f"{td}/v.mp4", f"{td}/a.mp3", f"{td}/out.mp4"
-            with open(vp, 'wb') as f: f.write(video_bytes)
-            with open(ap, 'wb') as f: f.write(audio_data)
-            r = subprocess.run([
-                'ffmpeg', '-i', vp, '-i', ap,
-                '-map', '0:v', '-map', '1:a',
-                '-c:v', 'copy', '-c:a', 'aac', '-shortest', '-y', op
-            ], capture_output=True, timeout=60)
-            if r.returncode == 0 and os.path.exists(op):
-                with open(op, 'rb') as f:
-                    logger.info("Audio merged successfully")
-                    return f.read()
-            logger.error(f"FFmpeg error: {r.stderr.decode()[:300]}")
-    except Exception as exc:
-        logger.error(f"Audio merge failed: {exc}")
-    return video_bytes
+        record = await db.video_generations.find_one(
+            {"id": video_id},
+            {"_id": 0},
+        )
 
-async def generate_video_background(vid: str, prompt: str, duration: int, audio_file_id: Optional[str], subject_media_ids: Optional[List[str]]):
-    try:
-        await update_video_status(vid, "generating")
-        vb = await generate_video_with_sora(prompt, duration, subject_media_ids or [])
-        if not vb:
-            await update_video_status(vid, "failed", error_message="Video generation returned no data")
+        if not record:
             return
+
+        subject_ids = (
+            record.get("subject_media_ids")
+            or []
+        )
+
+        if not subject_ids:
+            raise RuntimeError(
+                "Upload at least one subject image."
+            )
+
+        subject = await db.media_uploads.find_one(
+            {
+                "id": subject_ids[0],
+                "media_type": "image",
+                "is_deleted": False,
+            },
+            {"_id": 0},
+        )
+
+        if not subject:
+            raise RuntimeError(
+                "The selected subject image "
+                "was not found."
+            )
+
+        await set_video_status(
+            video_id,
+            "uploading_to_1min",
+        )
+
+        image_data = await download_bytes(
+            subject["storage_path"]
+        )
+
+        image_path = await upload_image_to_1min(
+            subject.get(
+                "original_filename",
+                "subject.jpg",
+            ),
+            subject.get(
+                "content_type",
+                "image/jpeg",
+            ),
+            image_data,
+        )
+
+        await set_video_status(
+            video_id,
+            "generating",
+        )
+
+        provider_job_id = await start_1min_video_job(
+            image_path=image_path,
+            prompt=record["prompt"],
+            duration=record.get("duration", 10),
+            aspect_ratio=record.get(
+                "aspect_ratio",
+                "16:9",
+            ),
+        )
+
+        await set_video_status(
+            video_id,
+            "generating",
+            provider_job_id=provider_job_id,
+        )
+
+        generated_url = await wait_for_1min_video(
+            provider_job_id
+        )
+
+        video_data = await download_bytes(
+            generated_url,
+            timeout=300.0,
+        )
+
+        audio_file_id = record.get(
+            "audio_file_id"
+        )
+
         if audio_file_id:
-            vb = await merge_audio(vb, audio_file_id)
-        path = f"{APP_NAME}/videos/{vid}.mp4"
-        result = put_object(path, vb, "video/mp4")
-        await update_video_status(vid, "completed", video_path=result["path"], completed_at=datetime.now(timezone.utc).isoformat())
-        logger.info(f"Video {vid} completed!")
+            await set_video_status(
+                video_id,
+                "adding_music",
+            )
+
+            audio_record = (
+                await db.media_uploads.find_one(
+                    {
+                        "id": audio_file_id,
+                        "media_type": "audio",
+                        "is_deleted": False,
+                    },
+                    {"_id": 0},
+                )
+            )
+
+            if not audio_record:
+                raise RuntimeError(
+                    "The selected music file "
+                    "was not found."
+                )
+
+            audio_data = await download_bytes(
+                audio_record["storage_path"]
+            )
+
+            video_data = await merge_music(
+                video_data,
+                audio_data,
+                file_extension(
+                    audio_record.get(
+                        "original_filename"
+                    )
+                ),
+            )
+
+        await set_video_status(
+            video_id,
+            "saving",
+        )
+
+        video_url = upload_to_cloudinary(
+            f"{APP_NAME}/videos/{video_id}.mp4",
+            video_data,
+            resource_type="video",
+        )
+
+        await set_video_status(
+            video_id,
+            "completed",
+            video_path=video_url,
+            completed_at=datetime.now(
+                timezone.utc
+            ).isoformat(),
+            error_message=None,
+        )
+
     except Exception as exc:
-        logger.error(f"Video {vid} failed: {exc}")
-        await update_video_status(vid, "failed", error_message=friendly_error(str(exc)))
+        logger.exception(
+            "Video generation failed for %s",
+            video_id,
+        )
 
-# ─── Routes ────────────────────────────────────────────────────────────
+        await set_video_status(
+            video_id,
+            "failed",
+            error_message=str(exc)[:1000],
+        )
 
-@app.on_event("startup")
-async def startup():
-    try:
-        # Ensure ffmpeg is available
-        import shutil
-        if not shutil.which('ffmpeg'):
-            subprocess.run(['apt-get', 'update', '-qq'], capture_output=True)
-            subprocess.run(['apt-get', 'install', '-y', 'ffmpeg', '-qq'], capture_output=True)
-            logger.info("FFmpeg installed")
-        
-        logger.info("App started, storage ready")
-    except Exception as e:
-        logger.error(f"Startup failed: {e}")
+
+# ============================================================
+# API routes
+# ============================================================
 
 @api_router.get("/")
-async def root():
-    return {"message": "NAUGHTY DAWGZ - ANOTHER ODB PRODUCTION API"}
-@api_router.post("/welcome-video")
-async def upload_welcome_video(file: UploadFile = File(...)):
-    """Upload and permanently store Rocco's welcome video."""
-
-    if not file.content_type or not file.content_type.startswith("video/"):
-        raise HTTPException(
-            status_code=400,
-            detail="Please select a valid video file."
-        )
-
-    data = await file.read()
-
-    if not data:
-        raise HTTPException(
-            status_code=400,
-            detail="The selected video is empty."
-        )
-
-    fid = str(uuid.uuid4())
-    extension = (
-        file.filename.rsplit(".", 1)[-1].lower()
-        if file.filename and "." in file.filename
-        else "mp4"
-    )
-
-    result = put_object(
-        f"{APP_NAME}/welcome/{fid}.{extension}",
-        data,
-        file.content_type
-    )
-
-    storage_path = result.get("storage_path")
-    if not storage_path:
-        raise HTTPException(
-            status_code=500,
-            detail="The video could not be stored."
-        )
-
-    # Mark any previous welcome video as deleted.
-    await db.media_uploads.update_many(
-        {"media_type": "welcome_video", "is_deleted": False},
-        {"$set": {"is_deleted": True}}
-    )
-
-    record = {
-        "id": fid,
-        "storage_path": storage_path,
-        "original_filename": file.filename or "rocko-welcome.mp4",
-        "content_type": file.content_type,
-        "media_type": "welcome_video",
-        "size_bytes": len(data),
-        "is_deleted": False,
-        "created_at": datetime.now(timezone.utc)
+async def api_root() -> dict:
+    return {
+        "message": (
+            "NAUGHTY DAWGZ - "
+            "AN ODB PRODUCTION API"
+        ),
+        "version": "2.0.0",
+        "video_provider": "1min.AI",
     }
 
-    await db.media_uploads.insert_one(record)
+
+@api_router.get("/health")
+async def health() -> dict:
+
+    try:
+        await db.command("ping")
+        database = "connected"
+
+    except Exception:
+        database = "unavailable"
 
     return {
-        "message": "Rocco's welcome video uploaded successfully.",
-        "id": fid
-  }  
-@api_router.post("/welcome-video")
-async def upload_welcome_video(file: UploadFile = File(...)):
-    """Upload and permanently store Rocco's welcome video."""
+        "status": (
+            "ok"
+            if database == "connected"
+            else "degraded"
+        ),
+        "database": database,
+        "ffmpeg": bool(shutil.which("ffmpeg")),
+    }
 
-    if not file.content_type or not file.content_type.startswith("video/"):
-        raise HTTPException(
-            status_code=400,
-            detail="Please select a valid video file."
-        )
+
+@api_router.post(
+    "/upload-media",
+    response_model=MediaUpload,
+)
+async def upload_media(
+    file: UploadFile = File(...),
+    media_type: str = Query(...),
+) -> MediaUpload:
 
     data = await file.read()
 
-    if not data:
-        raise HTTPException(
-            status_code=400,
-            detail="The selected video is empty."
+    normalized_type = validate_upload(
+        file.filename,
+        file.content_type,
+        media_type,
+        len(data),
+    )
+
+    media_id = str(uuid.uuid4())
+
+    guessed_extension = mimetypes.guess_extension(
+        file.content_type or ""
+    )
+
+    ext = (
+        file_extension(file.filename)
+        or (
+            guessed_extension.lstrip(".")
+            if guessed_extension
+            else ""
         )
-
-    fid = str(uuid.uuid4())
-    extension = (
-        file.filename.rsplit(".", 1)[-1].lower()
-        if file.filename and "." in file.filename
-        else "mp4"
+        or "bin"
     )
 
-    result = put_object(
-        f"{APP_NAME}/welcome/{fid}.{extension}",
+    if normalized_type == "image":
+        resource_type = "image"
+
+    elif normalized_type == "welcome_video":
+        resource_type = "video"
+
+    else:
+        resource_type = "auto"
+
+    storage_path = upload_to_cloudinary(
+        (
+            f"{APP_NAME}/uploads/"
+            f"{media_id}.{ext}"
+        ),
         data,
-        file.content_type
+        resource_type=resource_type,
     )
 
-    storage_path = result.get("storage_path")
-    if not storage_path:
-        raise HTTPException(
-            status_code=500,
-            detail="The video could not be stored."
-        )
-
-    # Mark any previous welcome video as deleted.
-    await db.media_uploads.update_many(
-        {"media_type": "welcome_video", "is_deleted": False},
-        {"$set": {"is_deleted": True}}
-    )
-
-    record = {
-        "id": fid,
-        "storage_path": storage_path,
-        "original_filename": file.filename or "rocko-welcome.mp4",
-        "content_type": file.content_type,
-        "media_type": "welcome_video",
-        "size_bytes": len(data),
-        "is_deleted": False,
-        "created_at": datetime.now(timezone.utc)
-    }
-
-    await db.media_uploads.insert_one(record)
-
-    return {
-        "message": "Rocco's welcome video uploaded successfully.",
-        "id": fid
-    }
-@api_router.get("/welcome-video")
-async def get_welcome_video():
-    """Get the welcome video for the landing page"""
-    rec = await db.media_uploads.find_one({"media_type": "welcome_video", "is_deleted": False}, {"_id": 0})
-    if not rec:
-        raise HTTPException(404, "No welcome video uploaded yet")
-    
-    data, _ = get_object(rec["storage_path"])
-    content_length = len(data)
-    
-    async def video_stream():
-        chunk_size = 1024 * 1024  # 1MB chunks
-        for i in range(0, len(data), chunk_size):
-            yield data[i:i + chunk_size]
-            await asyncio.sleep(0)  # Allow other tasks to run
-    
-    headers = {"Content-Length": str(content_length)}
-    return StreamingResponse(video_stream(), media_type="video/mp4", headers=headers)
-
-
-@api_router.post("/youtube-audio", response_model=MediaUpload)
-async def extract_youtube_audio(request: YouTubeAudioRequest):
-    return await upload_media_from_url(request.youtube_url, "audio")
-
-
-@api_router.post("/upload-media", response_model=MediaUpload)
-async def upload_media(file: UploadFile = File(...), media_type: str = Query(...)):
-    ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
-    fid = str(uuid.uuid4())
-    data = await file.read()
-
-    
-    result = put_object(
-        f"{APP_NAME}/uploads/{fid}.{ext}",
-        data,
-        file.content_type or "application/octet-stream"
-    )
-
-    print("UPLOAD RESULT:", result)
-
-    mu = MediaUpload(
-        id=fid,
-     storage_path=result.get("storage_path"),
-        original_filename=file.filename,
-        content_type=file.content_type or "application/octet-stream",
+    upload = MediaUpload(
+        id=media_id,
+        storage_path=storage_path,
+        original_filename=(
+            file.filename
+            or f"upload.{ext}"
+        ),
+        content_type=(
+            file.content_type
+            or "application/octet-stream"
+        ),
         size=len(data),
-        media_type=media_type
+        media_type=normalized_type,
     )
 
-        
+    await db.media_uploads.insert_one(
+        upload.model_dump()
+    )
 
-    doc = mu.model_dump()
-    await db.media_uploads.insert_one(doc)
-    return mu
+    return upload
+
+
 @api_router.get("/files/{file_id}")
 async def get_file(file_id: str):
-    rec = await db.media_uploads.find_one(
-        {"id": file_id, "is_deleted": False},
-        {"_id": 0}
+
+    record = await db.media_uploads.find_one(
+        {
+            "id": file_id,
+            "is_deleted": False,
+        },
+        {"_id": 0},
     )
 
-    if not rec:
-        raise HTTPException(404, "File not found")
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="File not found.",
+        )
 
-    data, ct = get_object(rec["storage_path"])
-    content_length = len(data)
-
-    async def file_stream():
-        chunk_size = 1024 * 1024
-        for i in range(0, len(data), chunk_size):
-            yield data[i:i + chunk_size]
-            await asyncio.sleep(0)
-
-    headers = {"Content-Length": str(content_length)}
-    return StreamingResponse(
-        file_stream(),
-        media_type=rec.get("content_type", "application/octet-stream"),
-        headers=headers
+    return RedirectResponse(
+        record["storage_path"]
     )
 
-@api_router.post("/youtube-audio", response_model=MediaUpload)
-async def extract_youtube_audio(request: YouTubeAudioRequest):
-    return await upload_media_from_url(request.youtube_url, "audio")
+
+@api_router.post(
+    "/welcome-video",
+    response_model=MediaUpload,
+)
+async def upload_welcome_video(
+    file: UploadFile = File(...),
+) -> MediaUpload:
+
+    data = await file.read()
+
+    validate_upload(
+        file.filename,
+        file.content_type,
+        "welcome_video",
+        len(data),
+    )
+
+    await db.media_uploads.update_many(
+        {
+            "media_type": "welcome_video",
+            "is_deleted": False,
+        },
+        {
+            "$set": {
+                "is_deleted": True,
+            }
+        },
+    )
+
+    media_id = str(uuid.uuid4())
+    ext = file_extension(file.filename) or "mp4"
+
+    storage_path = upload_to_cloudinary(
+        (
+            f"{APP_NAME}/welcome/"
+            f"{media_id}.{ext}"
+        ),
+        data,
+        resource_type="video",
+    )
+
+    upload = MediaUpload(
+        id=media_id,
+        storage_path=storage_path,
+        original_filename=(
+            file.filename
+            or "welcome-video.mp4"
+        ),
+        content_type=(
+            file.content_type
+            or "video/mp4"
+        ),
+        size=len(data),
+        media_type="welcome_video",
+    )
+
+    await db.media_uploads.insert_one(
+        upload.model_dump()
+    )
+
+    return upload
 
 
+@api_router.get("/welcome-video")
+async def get_welcome_video():
 
-    
-    data, _ = get_object(rec["video_path"])
-    content_length = len(data)
-    
-    async def video_stream():
-        chunk_size = 1024 * 1024  # 1MB chunks
-        for i in range(0, len(data), chunk_size):
-            yield data[i:i + chunk_size]
-            await asyncio.sleep(0)  # Allow other tasks to run
-    
-    headers = {"Content-Length": str(content_length)}
-    return StreamingResponse(video_stream(), media_type="video/mp4", headers=headers)
+    record = await db.media_uploads.find_one(
+        {
+            "media_type": "welcome_video",
+            "is_deleted": False,
+        },
+        sort=[("created_at", -1)],
+    )
 
-# ─── App config ────────────────────────────────────────────────────────
-@api_router.post("/generate-video")
-async def generate_video(request: GenerateVideoRequest):
-    vid = str(uuid.uuid4())
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="No welcome video uploaded.",
+        )
 
-    record = {
-        "id": vid,
-        "subject_media_ids": request.subject_media_ids,
-        "audio_file_id": request.audio_file_id,
-        "prompt": request.prompt,
-        "duration": request.duration,
-        "status": "pending",
-        "video_path": None,
-        "error_message": None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None,
-    }
+    return RedirectResponse(
+        record["storage_path"]
+    )
 
-    await db.video_generations.insert_one(record.copy())
+
+@api_router.post(
+    "/generate-video",
+    response_model=VideoGeneration,
+)
+async def generate_video(
+    request: GenerateVideoRequest,
+) -> VideoGeneration:
+
+    prompt = request.prompt.strip()
+
+    if not prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a video prompt.",
+        )
+
+    if not request.subject_media_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a subject image first.",
+        )
+
+    generation = VideoGeneration(
+        subject_media_ids=(
+            request.subject_media_ids
+        ),
+        audio_file_id=request.audio_file_id,
+        prompt=prompt,
+        duration=request.duration,
+        aspect_ratio=normalize_aspect_ratio(
+            request.aspect_ratio
+        ),
+    )
+
+    await db.video_generations.insert_one(
+        generation.model_dump()
+    )
 
     asyncio.create_task(
         generate_video_background(
-            vid=vid,
-            prompt=request.prompt,
-            duration=request.duration,
-            audio_file_id=request.audio_file_id,
-            subject_media_ids=request.subject_media_ids,
+            generation.id
         )
     )
 
-    record.pop("_id", None)
-    return record
+    return generation
 
 
-@api_router.get("/videos/{video_id}")
-async def get_video_status(video_id: str):
+@api_router.get(
+    "/videos/{video_id}",
+    response_model=VideoGeneration,
+)
+async def get_video_status(
+    video_id: str,
+) -> VideoGeneration:
+
     record = await db.video_generations.find_one(
         {"id": video_id},
         {"_id": 0},
@@ -522,16 +1073,85 @@ async def get_video_status(video_id: str):
     if not record:
         raise HTTPException(
             status_code=404,
-            detail="Video generation not found",
+            detail="Video generation not found.",
         )
 
-    return record
+    return VideoGeneration(**record)
+
+
+@api_router.get(
+    "/videos/{video_id}/content"
+)
+async def get_video_content(
+    video_id: str,
+):
+
+    record = await db.video_generations.find_one(
+        {"id": video_id},
+        {"_id": 0},
+    )
+
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail="Video generation not found.",
+        )
+
+    if (
+        record.get("status") != "completed"
+        or not record.get("video_path")
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Video is not ready yet.",
+        )
+
+    return RedirectResponse(
+        record["video_path"]
+    )
+
+
+# ============================================================
+# App setup
+# ============================================================
+
 app.include_router(api_router)
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-app.add_middleware(CORSMiddleware, allow_credentials=True,
-                   allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-                   allow_methods=["*"], allow_headers=["*"])
+
+
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "*",
+    ).split(",")
+    if origin.strip()
+]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=(
+        cors_origins != ["*"]
+    ),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+static_dir = ROOT_DIR / "static"
+static_dir.mkdir(exist_ok=True)
+
+app.mount(
+    "/",
+    StaticFiles(
+        directory=static_dir,
+        html=True,
+    ),
+    name="static",
+)
+
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+async def shutdown_database() -> None:
+    mongo_client.close()
